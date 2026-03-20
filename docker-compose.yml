@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: familylink-postgres
+    environment:
+      POSTGRES_DB:       familylink
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: localpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql  # 첫 실행 시 자동 적용
+
+  redis:
+    image: redis:7-alpine
+    container_name: familylink-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:
