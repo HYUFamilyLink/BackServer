@@ -1,6 +1,5 @@
-const { pool }         = require('../../config/database');
-const { getRedis }     = require('../../config/redis');
-const { createRouter, deleteRouter } = require('../../config/mediasoup');
+const { pool }     = require('../../config/database');
+const { getRedis } = require('../../config/redis');
 
 /**
  * 이벤트 목록
@@ -35,12 +34,6 @@ module.exports = function roomHandler(io, socket) {
       const participantKey = `room:${room.id}:participants`;
       await redis.sadd(participantKey, socket.user.id);
       await redis.expire(participantKey, 60 * 60 * 24); // 24h TTL
-
-      // mediasoup Router가 없으면 생성 (방당 1개)
-      const { getRouter } = require('../../config/mediasoup');
-      if (!getRouter(room.id)) {
-        await createRouter(room.id);
-      }
 
       // 현재 참여자 목록
       const memberIds   = await redis.smembers(participantKey);
@@ -88,12 +81,6 @@ async function _leaveRoom(io, socket, redis) {
     userId:   socket.user.id,
     nickname: socket.user.nickname,
   });
-
-  // 마지막 사람이 나가면 Router 정리
-  const remaining = await redis.scard(participantKey);
-  if (remaining === 0) {
-    deleteRouter(roomId);
-  }
 
   socket.leave(roomId);
   socket.roomId = null;

@@ -8,7 +8,7 @@ Node.js + Express 기반 백엔드 서버
 |------|------|
 | Node.js + Express | HTTP API 서버 |
 | Socket.IO | 실시간 통신 |
-| mediasoup | WebRTC 미디어 서버 |
+| Photon Voice (Cloud) | WebRTC 오디오 미디어 서버 |
 | PostgreSQL 16 | 데이터베이스 |
 | Redis 7 | 세션/캐시 |
 | JWT | 인증 |
@@ -21,8 +21,7 @@ BackServer/
 ├── src/
 │   ├── config/             # 설정
 │   │   ├── database.js     # PostgreSQL 연결
-│   │   ├── redis.js        # Redis 연결
-│   │   └── mediasoup.js    # WebRTC Worker 설정
+│   │   └── redis.js        # Redis 연결
 │   ├── controllers/        # 비즈니스 로직
 │   │   ├── authController.js
 │   │   ├── roomController.js
@@ -37,7 +36,6 @@ BackServer/
 │   ├── socket/             # Socket.IO 이벤트 핸들러
 │   │   ├── handlers/
 │   │   │   ├── roomHandler.js
-│   │   │   ├── mediasoupHandler.js
 │   │   │   ├── queueHandler.js
 │   │   │   └── lyricsHandler.js
 │   │   └── index.js
@@ -88,10 +86,6 @@ DB_PASSWORD=your_db_password   # 반드시 변경
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
-
-# mediasoup (WebRTC)
-MEDIASOUP_LISTEN_IP=0.0.0.0
-MEDIASOUP_ANNOUNCED_IP=127.0.0.1   # 배포 시 실제 서버 IP로 변경
 
 # AWS S3 (노래 파일 저장 시 필요)
 AWS_ACCESS_KEY_ID=

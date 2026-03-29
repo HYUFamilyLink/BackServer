@@ -4,7 +4,6 @@ const app = require('./app');
 const { initSocket } = require('./socket');
 const { connectDB } = require('./config/database');
 const { connectRedis } = require('./config/redis');
-const { createMediasoupWorker } = require('./config/mediasoup');
 
 const PORT = process.env.PORT || 4000;
 
@@ -12,7 +11,6 @@ async function bootstrap() {
   try {
     await connectDB();
     await connectRedis();
-    await createMediasoupWorker();
 
     const httpServer = http.createServer(app);
     initSocket(httpServer);

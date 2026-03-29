@@ -1,9 +1,8 @@
 const { Server } = require('socket.io');
 const jwt        = require('jsonwebtoken');
-const roomHandler      = require('./handlers/roomHandler');
-const queueHandler     = require('./handlers/queueHandler');
-const lyricsHandler    = require('./handlers/lyricsHandler');
-const mediasoupHandler = require('./handlers/mediasoupHandler');
+const roomHandler   = require('./handlers/roomHandler');
+const queueHandler  = require('./handlers/queueHandler');
+const lyricsHandler = require('./handlers/lyricsHandler');
 
 function initSocket(httpServer) {
   const io = new Server(httpServer, {
@@ -28,7 +27,6 @@ function initSocket(httpServer) {
     roomHandler(io, socket);
     queueHandler(io, socket);
     lyricsHandler(io, socket);
-    mediasoupHandler(io, socket);
 
     socket.on('disconnect', () => {
       console.log(`[Socket] Disconnected: ${socket.user.nickname}`);
