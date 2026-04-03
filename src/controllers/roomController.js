@@ -1,4 +1,4 @@
-const { pool }     = require('../config/database');
+const { pool } = require('../config/database');
 const { getRedis } = require('../config/redis');
 
 function generateJoinCode() {
@@ -42,9 +42,8 @@ async function findAvailableRoom() {
 
 async function getActiveRooms(req, res) {
   try {
-    // 1. 닫히지 않은 방들을 최근 순으로 조회
     const { rows: rooms } = await pool.query(
-      `SELECT r.id, r.join_code, r.status, r.created_at, u.nickname as host_name
+      `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name 
        FROM rooms r
        JOIN users u ON r.host_id = u.id
        WHERE r.status != 'closed'
@@ -102,7 +101,7 @@ async function getRoom(req, res) {
   const { joinCode } = req.params;
   try {
     const { rows } = await pool.query(
-      `SELECT r.*, u.nickname AS host_nickname
+      `SELECT r.*, u.name AS host_name
        FROM rooms r
        JOIN users u ON r.host_id = u.id
        WHERE r.join_code = $1 AND r.status != 'closed'`,

@@ -5,6 +5,11 @@ const { findAvailableRoom, internalCreateRoom } = require('../../controllers/roo
 module.exports = function roomHandler(io, socket) {
   const redis = getRedis();
 
+  // [수정] 1. 유저 접속 시 본인의 ID로 된 소켓 룸에 입장 (친구 요청/수락 알림 수신용)
+  if (socket.user && socket.user.id) {
+    socket.join(socket.user.id);
+  }
+
   // 방 입장 공통 로직
   const joinRoomAction = async (roomId, joinCode) => {
     socket.join(roomId);
@@ -23,9 +28,10 @@ module.exports = function roomHandler(io, socket) {
     const members = await redis.smembers(participantKey);
     const participants = members.map(m => JSON.parse(m));
 
+    // [중요] 전체 유저에게 방 정보 전송
     io.to(roomId).emit('room:state', {
       roomId,
-      joinCode,
+      joinCode, // [보강] 방 코드 포함
       status: 'waiting',
       participants,
     });
@@ -59,7 +65,6 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
-  // 중요: _leaveRoom 호출 시 await가 필요한 경우를 대비해 async로 처리
   socket.on('room:leave', async () => {
     await _leaveRoom(io, socket, redis);
   });
@@ -69,7 +74,6 @@ module.exports = function roomHandler(io, socket) {
   });
 };
 
-// SYNTAX ERROR 해결: async 키워드 확인
 async function _leaveRoom(io, socket, redis) {
   const roomId = socket.roomId;
   if (!roomId) return;
@@ -79,7 +83,7 @@ async function _leaveRoom(io, socket, redis) {
   try {
     const members = await redis.smembers(participantKey);
     
-    // Redis에서 해당 유저 제거
+    // 1. Redis에서 본인 제거
     for (const m of members) {
       const u = JSON.parse(m);
       if (u.id === socket.user.id) {
@@ -88,10 +92,10 @@ async function _leaveRoom(io, socket, redis) {
       }
     }
 
-    // 남은 인원 확인
-    const remaining = await redis.smembers(participantKey);
+    const remainingMembers = await redis.smembers(participantKey);
+    const participants = remainingMembers.map(m => JSON.parse(m));
     
-    if (remaining.length === 0) {
+    if (participants.length === 0) {
       // 0명이면 방 폐쇄
       await pool.query(
         "UPDATE rooms SET status = 'closed', closed_at = NOW() WHERE id = $1",
@@ -99,7 +103,18 @@ async function _leaveRoom(io, socket, redis) {
       );
       await redis.del(participantKey);
     } else {
-      // 인원이 남았다면 퇴장 알림
+      // [수정] 2. DB에서 현재 방의 코드를 다시 가져옴 (유실 방지)
+      const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
+      const currentJoinCode = rows[0]?.join_code;
+
+      // [수정] 3. 남은 인원에게 'joinCode'를 포함하여 상태 전송
+      // 프런트엔드 Store가 null을 받지 않도록 반드시 joinCode를 포함해야 함
+      io.to(roomId).emit('room:state', { 
+        roomId,
+        joinCode: currentJoinCode, // [핵심 해결책]
+        participants 
+      });
+      
       io.to(roomId).emit('room:user_left', { userId: socket.user.id });
     }
   } catch (err) {

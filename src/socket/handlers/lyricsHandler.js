@@ -17,14 +17,13 @@ module.exports = function lyricsHandler(io, socket) {
     socket.to(roomId).emit('lyrics:tick', { currentMs });
   });
 
-  // 폰 유저의 리액션 (이모지 등)
   socket.on('user:reaction', ({ emoji } = {}) => {
     const roomId = socket.roomId;
     if (!roomId) return;
 
     io.to(roomId).emit('user:reaction', {
       userId:   socket.user.id,
-      nickname: socket.user.nickname,
+      nickname: socket.user.nickname, 
       emoji,
     });
   });
