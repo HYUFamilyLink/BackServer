@@ -5,9 +5,9 @@ services:
     environment:
       POSTGRES_DB:       familylink
       POSTGRES_USER:     postgres
-      POSTGRES_PASSWORD: localpassword
+      POSTGRES_PASSWORD: "0310"
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql  # 첫 실행 시 자동 적용

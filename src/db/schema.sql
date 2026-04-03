@@ -5,14 +5,21 @@
 -- 유저
 CREATE TABLE IF NOT EXISTS users (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  nickname   VARCHAR(32) NOT NULL,
-  email      VARCHAR(128) UNIQUE NOT NULL,
-  password   VARCHAR(128) NOT NULL,
-  role       VARCHAR(8)  NOT NULL DEFAULT 'phone'  -- 'vr' | 'phone'
+  name       VARCHAR(32) UNIQUE NOT NULL,  -- 로그인 아이디 겸 표시 이름 (예: 김순자, 김순자A)
+  pin        VARCHAR(128) NOT NULL,        -- 4자리 생년월일 (bcrypt 등으로 암호화 저장 권장)
+  role       VARCHAR(8)  NOT NULL DEFAULT 'phone'  
                          CHECK (role IN ('vr', 'phone')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS friends (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  requester_id UUID        NOT NULL REFERENCES users(id),
+  receiver_id  UUID        NOT NULL REFERENCES users(id),
+  status       VARCHAR(16) NOT NULL DEFAULT 'pending' 
+                           CHECK (status IN ('pending', 'accepted')),
+  UNIQUE(requester_id, receiver_id)
+);
 -- 노래 목록 (YouTube 메타데이터)
 CREATE TABLE IF NOT EXISTS songs (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,66 +1,65 @@
 const { pool }     = require('../../config/database');
 const { getRedis } = require('../../config/redis');
+const { findAvailableRoom, internalCreateRoom } = require('../../controllers/roomController');
 
-/**
- * 이벤트 목록
- *   room:join    { joinCode }          → 방 입장
- *   room:leave                         → 방 퇴장
- *
- * 브로드캐스트
- *   room:user_joined  { userId, nickname, role }
- *   room:user_left    { userId, nickname }
- *   room:state        { roomId, status, participants[] }  ← 입장 시 현재 상태 전달
- */
 module.exports = function roomHandler(io, socket) {
   const redis = getRedis();
 
-  socket.on('room:join', async ({ joinCode } = {}, ack) => {
+  // 방 입장 공통 로직
+  const joinRoomAction = async (roomId, joinCode) => {
+    socket.join(roomId);
+    socket.roomId = roomId;
+
+    const participantKey = `room:${roomId}:participants`;
+    const userData = JSON.stringify({
+      id: socket.user.id,
+      nickname: socket.user.nickname,
+      role: socket.user.role
+    });
+
+    await redis.sadd(participantKey, userData);
+    await redis.expire(participantKey, 86400); // 24시간 유지
+
+    const members = await redis.smembers(participantKey);
+    const participants = members.map(m => JSON.parse(m));
+
+    io.to(roomId).emit('room:state', {
+      roomId,
+      joinCode,
+      status: 'waiting',
+      participants,
+    });
+  };
+
+  socket.on('room:match', async () => {
     try {
-      // 방 조회
-      const { rows } = await pool.query(
-        `SELECT * FROM rooms WHERE join_code = $1 AND status != 'closed'`,
-        [joinCode],
-      );
-      if (!rows.length) {
-        return ack?.({ error: 'Room not found' });
+      let room = await findAvailableRoom();
+      if (!room) {
+        room = await internalCreateRoom(socket.user.id);
       }
-      const room = rows[0];
-
-      // Socket.IO room 참여
-      socket.join(room.id);
-      socket.roomId = room.id;
-
-      // Redis에 참여자 등록
-      const participantKey = `room:${room.id}:participants`;
-      await redis.sadd(participantKey, socket.user.id);
-      await redis.expire(participantKey, 60 * 60 * 24); // 24h TTL
-
-      // 현재 참여자 목록
-      const memberIds   = await redis.smembers(participantKey);
-      const participants = memberIds.map((id) => ({ id }));
-
-      // 입장한 본인에게 방 상태 전달
-      socket.emit('room:state', {
-        roomId:       room.id,
-        joinCode:     room.join_code,
-        status:       room.status,
-        participants,
-      });
-
-      // 같은 방 다른 사람들에게 알림
-      socket.to(room.id).emit('room:user_joined', {
-        userId:   socket.user.id,
-        nickname: socket.user.nickname,
-        role:     socket.user.role,
-      });
-
-      ack?.({ roomId: room.id });
+      await joinRoomAction(room.id, room.join_code);
     } catch (err) {
-      console.error('[roomHandler] room:join error', err);
-      ack?.({ error: 'Server error' });
+      console.error('[Socket] Match Error:', err);
+      socket.emit('error', { message: '매칭 처리 중 오류 발생' });
     }
   });
 
+  socket.on('room:join', async ({ joinCode } = {}, ack) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT * FROM rooms WHERE join_code = $1 AND status != 'closed'`,
+        [joinCode.toUpperCase()]
+      );
+      if (!rows.length) return ack?.({ error: '방을 찾을 수 없습니다.' });
+      
+      await joinRoomAction(rows[0].id, rows[0].join_code);
+      ack?.({ roomId: rows[0].id });
+    } catch (err) {
+      ack?.({ error: '입장 실패' });
+    }
+  });
+
+  // 중요: _leaveRoom 호출 시 await가 필요한 경우를 대비해 async로 처리
   socket.on('room:leave', async () => {
     await _leaveRoom(io, socket, redis);
   });
@@ -70,18 +69,43 @@ module.exports = function roomHandler(io, socket) {
   });
 };
 
+// SYNTAX ERROR 해결: async 키워드 확인
 async function _leaveRoom(io, socket, redis) {
   const roomId = socket.roomId;
   if (!roomId) return;
 
   const participantKey = `room:${roomId}:participants`;
-  await redis.srem(participantKey, socket.user.id);
+  
+  try {
+    const members = await redis.smembers(participantKey);
+    
+    // Redis에서 해당 유저 제거
+    for (const m of members) {
+      const u = JSON.parse(m);
+      if (u.id === socket.user.id) {
+        await redis.srem(participantKey, m);
+        break;
+      }
+    }
 
-  socket.to(roomId).emit('room:user_left', {
-    userId:   socket.user.id,
-    nickname: socket.user.nickname,
-  });
-
-  socket.leave(roomId);
-  socket.roomId = null;
+    // 남은 인원 확인
+    const remaining = await redis.smembers(participantKey);
+    
+    if (remaining.length === 0) {
+      // 0명이면 방 폐쇄
+      await pool.query(
+        "UPDATE rooms SET status = 'closed', closed_at = NOW() WHERE id = $1",
+        [roomId]
+      );
+      await redis.del(participantKey);
+    } else {
+      // 인원이 남았다면 퇴장 알림
+      io.to(roomId).emit('room:user_left', { userId: socket.user.id });
+    }
+  } catch (err) {
+    console.error('[Socket] Leave Error:', err);
+  } finally {
+    socket.leave(roomId);
+    socket.roomId = null;
+  }
 }
