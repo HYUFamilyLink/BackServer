@@ -67,3 +67,5 @@ CREATE TABLE IF NOT EXISTS scores (
 CREATE INDEX IF NOT EXISTS idx_rooms_join_code    ON rooms(join_code);
 CREATE INDEX IF NOT EXISTS idx_queue_room_id      ON queue_items(room_id, position);
 CREATE INDEX IF NOT EXISTS idx_scores_room_id     ON scores(room_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_friend_pair 
+ON friends (LEAST(requester_id, receiver_id), GREATEST(requester_id, receiver_id));

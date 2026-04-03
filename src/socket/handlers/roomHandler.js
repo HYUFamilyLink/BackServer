@@ -109,7 +109,7 @@ async function _leaveRoom(io, socket, redis) {
 
       // [수정] 3. 남은 인원에게 'joinCode'를 포함하여 상태 전송
       // 프런트엔드 Store가 null을 받지 않도록 반드시 joinCode를 포함해야 함
-      io.to(roomId).emit('room:state', { 
+      socket.to(roomId).emit('room:state', { 
         roomId,
         joinCode: currentJoinCode, // [핵심 해결책]
         participants 
