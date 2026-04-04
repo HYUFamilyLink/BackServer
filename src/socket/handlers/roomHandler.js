@@ -5,7 +5,7 @@ const { findAvailableRoom, internalCreateRoom } = require('../../controllers/roo
 module.exports = function roomHandler(io, socket) {
   const redis = getRedis();
 
-  // [수정] 1. 유저 접속 시 본인의 ID로 된 소켓 룸에 입장 (친구 요청/수락 알림 수신용)
+  // 1. 유저 접속 시 본인의 ID로 된 소켓 룸에 입장 (친구 요청/수락 알림 수신용)
   if (socket.user && socket.user.id) {
     socket.join(socket.user.id);
   }
@@ -28,15 +28,16 @@ module.exports = function roomHandler(io, socket) {
     const members = await redis.smembers(participantKey);
     const participants = members.map(m => JSON.parse(m));
 
-    // [중요] 전체 유저에게 방 정보 전송
+    // [중요] 전체 유저에게 방 정보 전송 (프론트엔드가 이 신호를 받고 화면을 넘김)
     io.to(roomId).emit('room:state', {
       roomId,
-      joinCode, // [보강] 방 코드 포함
+      joinCode,
       status: 'waiting',
       participants,
     });
   };
 
+  // 기존: 랜덤 매칭 기능
   socket.on('room:match', async () => {
     try {
       let room = await findAvailableRoom();
@@ -50,6 +51,21 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
+  // [핵심 추가] 누락되었던 새 방 만들기 전용 리스너
+  socket.on('room:create', async () => {
+    try {
+      // 랜덤 빈 방을 찾지 않고 무조건 호스트가 되어 새 방을 생성
+      const room = await internalCreateRoom(socket.user.id);
+      
+      // 생성된 방으로 바로 입장 (joinRoomAction이 room:state를 프론트로 쏴줌)
+      await joinRoomAction(room.id, room.join_code);
+    } catch (err) {
+      console.error('[Socket] Create Room Error:', err);
+      socket.emit('error', { message: '새 방 생성 중 오류 발생' });
+    }
+  });
+
+  // 기존: 코드 입력으로 입장
   socket.on('room:join', async ({ joinCode } = {}, ack) => {
     try {
       const { rows } = await pool.query(
@@ -65,6 +81,7 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
+  // 기존: 방 나가기
   socket.on('room:leave', async () => {
     await _leaveRoom(io, socket, redis);
   });
@@ -74,6 +91,7 @@ module.exports = function roomHandler(io, socket) {
   });
 };
 
+// 방 퇴장 처리 서브 함수
 async function _leaveRoom(io, socket, redis) {
   const roomId = socket.roomId;
   if (!roomId) return;
@@ -103,15 +121,14 @@ async function _leaveRoom(io, socket, redis) {
       );
       await redis.del(participantKey);
     } else {
-      // [수정] 2. DB에서 현재 방의 코드를 다시 가져옴 (유실 방지)
+      // 2. DB에서 현재 방의 코드를 다시 가져옴 (유실 방지)
       const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
       const currentJoinCode = rows[0]?.join_code;
 
-      // [수정] 3. 남은 인원에게 'joinCode'를 포함하여 상태 전송
-      // 프런트엔드 Store가 null을 받지 않도록 반드시 joinCode를 포함해야 함
+      // 3. 남은 인원에게 'joinCode'를 포함하여 상태 전송
       socket.to(roomId).emit('room:state', { 
         roomId,
-        joinCode: currentJoinCode, // [핵심 해결책]
+        joinCode: currentJoinCode,
         participants 
       });
       
@@ -123,4 +140,4 @@ async function _leaveRoom(io, socket, redis) {
     socket.leave(roomId);
     socket.roomId = null;
   }
-}
+};
