@@ -52,13 +52,31 @@ module.exports = function roomHandler(io, socket) {
   });
 
   // [핵심 추가] 누락되었던 새 방 만들기 전용 리스너
-  socket.on('room:create', async () => {
+  // 방 만들기 + 초대 로직
+  socket.on('room:create', async (payload = {}) => {
     try {
-      // 랜덤 빈 방을 찾지 않고 무조건 호스트가 되어 새 방을 생성
+      const { invitedFriends = [] } = payload; // 프론트엔드에서 보낸 초대 명단 받기
+
+    // 방 생성 및 입장
       const room = await internalCreateRoom(socket.user.id);
-      
-      // 생성된 방으로 바로 입장 (joinRoomAction이 room:state를 프론트로 쏴줌)
       await joinRoomAction(room.id, room.join_code);
+
+    // 선택된 친구들에게 소켓 알림 
+      if (invitedFriends.length > 0) {
+        const inviteData = {
+          id: room.id, // 프론트에서 렌더링에 사용할 임시 아이디
+          roomId: room.id,
+          joinCode: room.join_code,
+          hostName: socket.user.nickname,
+          currentSong: '대기 중',
+          participantCount: 1 // 방금 호스트가 들어갔으므로 1
+        };
+
+      invitedFriends.forEach(friendId => {
+        // 개인 소켓 룸으로 'room:invite' 이벤트 발송
+          io.to(String(friendId)).emit('room:invite', inviteData);
+        });
+      }
     } catch (err) {
       console.error('[Socket] Create Room Error:', err);
       socket.emit('error', { message: '새 방 생성 중 오류 발생' });
@@ -140,4 +158,27 @@ async function _leaveRoom(io, socket, redis) {
     socket.leave(roomId);
     socket.roomId = null;
   }
+  socket.on('room:send_invites', async (payload) => {
+    try {
+      const { invitedFriends = [], roomId, joinCode, currentSong, participantCount } = payload;
+      
+      if (!invitedFriends.length) return;
+
+      const inviteData = {
+        id: roomId, // 홈 화면 렌더링에 사용될 고유 키
+        roomId: roomId,
+        joinCode: joinCode,
+        hostName: socket.user.nickname, // 나(초대자)의 이름
+        currentSong: currentSong,
+        participantCount: participantCount
+      };
+
+      invitedFriends.forEach(friendId => {
+        // 상대방 소켓(및 향후 연동될 VR 소켓)으로 초대 이벤트 발송
+        io.to(String(friendId)).emit('room:invite', inviteData);
+      });
+    } catch (err) {
+      console.error('[Socket] Send Invites Error:', err);
+    }
+  });
 };
