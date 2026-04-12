@@ -35,6 +35,13 @@ module.exports = function roomHandler(io, socket) {
       status: 'waiting',
       participants,
     });
+
+    //명세서에 구현되어 있지 않아 동시에 송출하도록 수정
+    io.to(roomId).emit('room:user_joined',{
+      id: socket.user.id,
+      nickname: socket.user.nickname,
+      role: socket.user.role,
+    });
   };
 
   // 기존: 랜덤 매칭 기능
