@@ -5,9 +5,9 @@ const { findAvailableRoom, internalCreateRoom } = require('../../controllers/roo
 module.exports = function roomHandler(io, socket) {
   const redis = getRedis();
 
-  // 1. 유저 접속 시 본인의 ID로 된 소켓 룸에 입장 (친구 요청/수락 알림 수신용)
+  // 1. 유저 접속 시 본인의 ID로 된 소켓 룸에 입장
   if (socket.user && socket.user.id) {
-    socket.join(socket.user.id);
+    socket.join(String(socket.user.id).trim());
   }
 
   // 방 입장 공통 로직
@@ -16,19 +16,30 @@ module.exports = function roomHandler(io, socket) {
     socket.roomId = roomId;
 
     const participantKey = `room:${roomId}:participants`;
+    const myIdStr = String(socket.user.id).trim();
+
+    // [중복 방어] 기존 배열에 내 ID가 존재하면 삭제 후 재삽입
+    const existingMembers = await redis.smembers(participantKey);
+    for (const m of existingMembers) {
+      const parsed = JSON.parse(m);
+      if (String(parsed.id).trim() === myIdStr) {
+        await redis.srem(participantKey, m);
+      }
+    }
+
     const userData = JSON.stringify({
-      id: socket.user.id,
+      id: myIdStr,
       nickname: socket.user.nickname,
       role: socket.user.role
     });
 
     await redis.sadd(participantKey, userData);
-    await redis.expire(participantKey, 86400); // 24시간 유지
+    await redis.expire(participantKey, 86400);
 
-    const members = await redis.smembers(participantKey);
-    const participants = members.map(m => JSON.parse(m));
+    const updatedMembers = await redis.smembers(participantKey);
+    const participants = updatedMembers.map(m => JSON.parse(m));
 
-    // [중요] 전체 유저에게 방 정보 전송 (프론트엔드가 이 신호를 받고 화면을 넘김)
+    // 전체 인원에게 현재 방의 완성된 명단 전송 (나 포함)
     io.to(roomId).emit('room:state', {
       roomId,
       joinCode,
@@ -36,15 +47,15 @@ module.exports = function roomHandler(io, socket) {
       participants,
     });
 
-    //명세서에 구현되어 있지 않아 동시에 송출하도록 수정
-    io.to(roomId).emit('room:user_joined',{
-      id: socket.user.id,
+    // ✨ [수정] socket.to 를 사용하여 나를 제외한 나머지 인원에게만 '새 유저 입장' 알림 전송
+    // 이렇게 해야 프론트엔드에서 내 정보가 중복으로 추가되지 않습니다.
+    socket.to(roomId).emit('room:user_joined',{
+      id: myIdStr,
       nickname: socket.user.nickname,
       role: socket.user.role,
     });
   };
 
-  // 기존: 랜덤 매칭 기능
   socket.on('room:match', async () => {
     try {
       let room = await findAvailableRoom();
@@ -58,30 +69,23 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
-  // [핵심 추가] 누락되었던 새 방 만들기 전용 리스너
-  // 방 만들기 + 초대 로직
   socket.on('room:create', async (payload = {}) => {
     try {
-      const { invitedFriends = [] } = payload; // 프론트엔드에서 보낸 초대 명단 받기
-
-    // 방 생성 및 입장
+      const { invitedFriends = [] } = payload; 
       const room = await internalCreateRoom(socket.user.id);
       await joinRoomAction(room.id, room.join_code);
 
-    // 선택된 친구들에게 소켓 알림 
       if (invitedFriends.length > 0) {
         const inviteData = {
-          id: room.id, // 프론트에서 렌더링에 사용할 임시 아이디
+          id: room.id, 
           roomId: room.id,
           joinCode: room.join_code,
           hostName: socket.user.nickname,
           currentSong: '대기 중',
-          participantCount: 1 // 방금 호스트가 들어갔으므로 1
+          participantCount: 1 
         };
-
-      invitedFriends.forEach(friendId => {
-        // 개인 소켓 룸으로 'room:invite' 이벤트 발송
-          io.to(String(friendId)).emit('room:invite', inviteData);
+        invitedFriends.forEach(friendId => {
+          io.to(String(friendId).trim()).emit('room:invite', inviteData);
         });
       }
     } catch (err) {
@@ -90,7 +94,6 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
-  // 기존: 코드 입력으로 입장
   socket.on('room:join', async ({ joinCode } = {}, ack) => {
     try {
       const { rows } = await pool.query(
@@ -106,7 +109,6 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
-  // 기존: 방 나가기
   socket.on('room:leave', async () => {
     await _leaveRoom(io, socket, redis);
   });
@@ -114,24 +116,37 @@ module.exports = function roomHandler(io, socket) {
   socket.on('disconnect', async () => {
     await _leaveRoom(io, socket, redis);
   });
+
+  socket.on('room:send_invites', async (payload) => {
+    try {
+      const { invitedFriends = [], roomId, joinCode, currentSong, participantCount } = payload;
+      if (!invitedFriends.length) return;
+      const inviteData = {
+        id: roomId, roomId, joinCode, hostName: socket.user.nickname,
+        currentSong, participantCount
+      };
+      invitedFriends.forEach(friendId => {
+        io.to(String(friendId).trim()).emit('room:invite', inviteData);
+      });
+    } catch (err) {
+      console.error('[Socket] Send Invites Error:', err);
+    }
+  });
 };
 
-// 방 퇴장 처리 서브 함수
 async function _leaveRoom(io, socket, redis) {
   const roomId = socket.roomId;
   if (!roomId) return;
 
   const participantKey = `room:${roomId}:participants`;
+  const myIdStr = String(socket.user.id).trim();
   
   try {
     const members = await redis.smembers(participantKey);
-    
-    // 1. Redis에서 본인 제거
     for (const m of members) {
       const u = JSON.parse(m);
-      if (u.id === socket.user.id) {
+      if (String(u.id).trim() === myIdStr) {
         await redis.srem(participantKey, m);
-        break;
       }
     }
 
@@ -139,25 +154,16 @@ async function _leaveRoom(io, socket, redis) {
     const participants = remainingMembers.map(m => JSON.parse(m));
     
     if (participants.length === 0) {
-      // 0명이면 방 폐쇄
-      await pool.query(
-        "UPDATE rooms SET status = 'closed', closed_at = NOW() WHERE id = $1",
-        [roomId]
-      );
+      await pool.query("UPDATE rooms SET status = 'closed', closed_at = NOW() WHERE id = $1", [roomId]);
       await redis.del(participantKey);
     } else {
-      // 2. DB에서 현재 방의 코드를 다시 가져옴 (유실 방지)
       const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
-      const currentJoinCode = rows[0]?.join_code;
-
-      // 3. 남은 인원에게 'joinCode'를 포함하여 상태 전송
       socket.to(roomId).emit('room:state', { 
         roomId,
-        joinCode: currentJoinCode,
+        joinCode: rows[0]?.join_code,
         participants 
       });
-      
-      io.to(roomId).emit('room:user_left', { userId: socket.user.id });
+      io.to(roomId).emit('room:user_left', { userId: myIdStr });
     }
   } catch (err) {
     console.error('[Socket] Leave Error:', err);
@@ -165,27 +171,4 @@ async function _leaveRoom(io, socket, redis) {
     socket.leave(roomId);
     socket.roomId = null;
   }
-  socket.on('room:send_invites', async (payload) => {
-    try {
-      const { invitedFriends = [], roomId, joinCode, currentSong, participantCount } = payload;
-      
-      if (!invitedFriends.length) return;
-
-      const inviteData = {
-        id: roomId, // 홈 화면 렌더링에 사용될 고유 키
-        roomId: roomId,
-        joinCode: joinCode,
-        hostName: socket.user.nickname, // 나(초대자)의 이름
-        currentSong: currentSong,
-        participantCount: participantCount
-      };
-
-      invitedFriends.forEach(friendId => {
-        // 상대방 소켓(및 향후 연동될 VR 소켓)으로 초대 이벤트 발송
-        io.to(String(friendId)).emit('room:invite', inviteData);
-      });
-    } catch (err) {
-      console.error('[Socket] Send Invites Error:', err);
-    }
-  });
-};
+}
