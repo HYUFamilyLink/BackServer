@@ -11,28 +11,16 @@ async function register(req, res) {
   try {
     const validRole = ['vr', 'phone'].includes(role) ? role : 'phone';
     // DB 컬럼명은 name을 사용
+    // 동일 name + role 조합은 중복 가입 차단 (PIN 무관)
     const { rows: existingUsers } = await pool.query(
-      'SELECT name FROM users WHERE name LIKE $1 ORDER BY name DESC',
-      [`${name}%`]
+      'SELECT name FROM users WHERE name = $1 AND role = $2',
+      [name, validRole]
     );
-
-    let finalName = name;
     if (existingUsers.length > 0) {
-      const exactMatch = existingUsers.find(u => u.name === name);
-      if (exactMatch) {
-        const alphabets = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        let nextChar = 'A';
-        for (let row of existingUsers) {
-          const suffix = row.name.replace(name, '');
-          if (suffix.length === 1 && alphabets.includes(suffix)) {
-            const nextIndex = alphabets.indexOf(suffix) + 1;
-            nextChar = alphabets[nextIndex] || 'A';
-            break;
-          }
-        }
-        finalName = name + nextChar;
-      }
+      return res.status(409).json({ error: '이미 등록된 계정입니다.' });
     }
+
+    const finalName = name;
 
     const hashed = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
