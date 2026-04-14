@@ -40,48 +40,39 @@ async function findAvailableRoom() {
   return null;
 }
 
+async function buildRoomList() {
+  const { rows: rooms } = await pool.query(
+    `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name
+     FROM rooms r
+     JOIN users u ON r.host_id = u.id
+     WHERE r.status != 'closed'
+     ORDER BY r.created_at DESC`
+  );
+  const redis = getRedis();
+  return Promise.all(rooms.map(async (room) => {
+    const participants = await redis.smembers(`room:${room.id}:participants`);
+    let currentSongTitle = '준비 중';
+    if (room.status === 'singing') {
+      const { rows: songRows } = await pool.query(
+        `SELECT s.title FROM queue_items qi JOIN songs s ON qi.song_id = s.id
+         WHERE qi.room_id = $1 AND qi.played = FALSE ORDER BY qi.position ASC LIMIT 1`,
+        [room.id]
+      );
+      if (songRows.length > 0) currentSongTitle = songRows[0].title;
+    } else if (room.status === 'result') {
+      currentSongTitle = '점수 확인 중';
+    }
+    return {
+      id: room.id, joinCode: room.join_code, status: room.status,
+      hostName: room.host_name, participantCount: participants.length,
+      currentSong: currentSongTitle
+    };
+  }));
+}
+
 async function getActiveRooms(req, res) {
   try {
-    const { rows: rooms } = await pool.query(
-      `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name 
-       FROM rooms r
-       JOIN users u ON r.host_id = u.id
-       WHERE r.status != 'closed'
-       ORDER BY r.created_at DESC`
-    );
-
-    const redis = getRedis();
-    
-    // 2. 각 방의 인원수와 현재 곡 정보 수집
-    const roomsWithDetails = await Promise.all(rooms.map(async (room) => {
-      const participants = await redis.smembers(`room:${room.id}:participants`);
-      
-      let currentSongTitle = '준비 중';
-      if (room.status === 'singing') {
-        const { rows: songRows } = await pool.query(
-          `SELECT s.title 
-           FROM queue_items qi 
-           JOIN songs s ON qi.song_id = s.id 
-           WHERE qi.room_id = $1 AND qi.played = FALSE 
-           ORDER BY qi.position ASC LIMIT 1`,
-          [room.id]
-        );
-        if (songRows.length > 0) currentSongTitle = songRows[0].title;
-      } else if (room.status === 'result') {
-        currentSongTitle = '점수 확인 중';
-      }
-
-      return {
-        id: room.id,
-        joinCode: room.join_code,
-        status: room.status,
-        hostName: room.host_name,
-        participantCount: participants.length,
-        currentSong: currentSongTitle
-      };
-    }));
-
-    res.json(roomsWithDetails);
+    res.json(await buildRoomList());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '방 목록을 불러오지 못했습니다.' });
@@ -128,11 +119,12 @@ async function closeRoom(req, res) {
   }
 }
 
-module.exports = { 
-  createRoom, 
-  getRoom, 
-  closeRoom, 
-  internalCreateRoom, 
+module.exports = {
+  createRoom,
+  getRoom,
+  closeRoom,
+  internalCreateRoom,
   findAvailableRoom,
-  getActiveRooms 
+  getActiveRooms,
+  buildRoomList
 };

@@ -1,6 +1,15 @@
 const { pool }     = require('../../config/database');
 const { getRedis } = require('../../config/redis');
-const { findAvailableRoom, internalCreateRoom } = require('../../controllers/roomController');
+const { findAvailableRoom, internalCreateRoom, buildRoomList } = require('../../controllers/roomController');
+
+async function broadcastRoomList(io) {
+  try {
+    const rooms = await buildRoomList();
+    io.emit('rooms:updated', rooms);
+  } catch (err) {
+    console.error('[Socket] broadcastRoomList error:', err);
+  }
+}
 
 module.exports = function roomHandler(io, socket) {
   const redis = getRedis();
@@ -63,6 +72,7 @@ module.exports = function roomHandler(io, socket) {
         room = await internalCreateRoom(socket.user.id);
       }
       await joinRoomAction(room.id, room.join_code);
+      await broadcastRoomList(io);
     } catch (err) {
       console.error('[Socket] Match Error:', err);
       socket.emit('error', { message: '매칭 처리 중 오류 발생' });
@@ -71,18 +81,19 @@ module.exports = function roomHandler(io, socket) {
 
   socket.on('room:create', async (payload = {}) => {
     try {
-      const { invitedFriends = [] } = payload; 
+      const { invitedFriends = [] } = payload;
       const room = await internalCreateRoom(socket.user.id);
       await joinRoomAction(room.id, room.join_code);
+      await broadcastRoomList(io);
 
       if (invitedFriends.length > 0) {
         const inviteData = {
-          id: room.id, 
+          id: room.id,
           roomId: room.id,
           joinCode: room.join_code,
           hostName: socket.user.nickname,
           currentSong: '대기 중',
-          participantCount: 1 
+          participantCount: 1
         };
         invitedFriends.forEach(friendId => {
           io.to(String(friendId).trim()).emit('room:invite', inviteData);
@@ -156,6 +167,7 @@ async function _leaveRoom(io, socket, redis) {
     if (participants.length === 0) {
       await pool.query("UPDATE rooms SET status = 'closed', closed_at = NOW() WHERE id = $1", [roomId]);
       await redis.del(participantKey);
+      await broadcastRoomList(io);
     } else {
       const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
       socket.to(roomId).emit('room:state', { 
