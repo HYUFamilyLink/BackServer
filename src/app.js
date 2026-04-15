@@ -8,7 +8,10 @@ const agoraRoutes = require('./routes/agora');
 const friendsRouter = require('./routes/friends');
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning'],
+}));
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
