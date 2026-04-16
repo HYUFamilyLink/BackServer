@@ -10,7 +10,7 @@ async function getSongs(req, res) {
 
   try {
     // 1. 유튜브 API 검색
-    const searchQuery = `${q} 노래방`;
+    const searchQuery = `${q} 금영노래방 공식 유튜브 채널`;
     const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY; // .env 파일에 설정
     
     const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
@@ -19,36 +19,56 @@ async function getSongs(req, res) {
         q: searchQuery,
         type: 'video',
         videoEmbeddable: 'true',
-        maxResults: 10,
+        videoSyndicated: 'true',
+        maxResults: 20,
         key: YOUTUBE_API_KEY
       }
     });
 
     // 2. 검색 결과 가공
     const songs = response.data.items.map(item => {
-      const videoId = item.id.videoId;
-      const rawTitle = item.snippet.title;
-      const thumbnail = item.snippet.thumbnails.high.url;
+  const videoId = item.id.videoId;
+  const rawTitle = item.snippet.title;
+  const thumbnail = item.snippet.thumbnails.high.url;
 
-      let title = rawTitle;
-      let artist = '알 수 없음';
+  // 1. 곡 번호 추출 (괄호 안의 KY.0000 또는 TJ.0000 패턴 매칭)
+  const numberMatch = rawTitle.match(/\((KY|TJ)\.?\s*(\d+)\)/i);
+  const songNo = numberMatch ? numberMatch[0].replace(/[()]/g, '') : ''; // 예: "KY.7463"
 
-      // ' - ' 를 기준으로 나누고, 괄호 등 지저분한 텍스트 제거 (간단한 파싱 예시)
-      const parts = rawTitle.split(' - ');
-      if (parts.length >= 2) {
-        title = parts[0].replace(/\[.*?\]|\(.*?\)/g, '').trim(); // [TJ노래방] 제거
-        artist = parts[1].replace(/(\/|금영|Karaoke).*$/i, '').trim(); // 뒤쪽 텍스트 제거
-      }
+  // 2. 불필요한 태그 및 곡 번호 부분 제거 ([TJ노래방], (KY.1234), [KY 등)
+  let cleanTitle = rawTitle
+    .replace(/\[.*?\]/g, '') // [ ]로 둘러싸인 부분 제거
+    .replace(/\(.*?\)/g, '') // ( )로 둘러싸인 부분(곡 번호 포함) 제거
+    .replace(/\//g, '-')      // 구분자 통일
+    .trim();
 
-      return {
-        id: videoId, // DB id 대신 유튜브 videoId를 고유값으로 사용
-        video_id: videoId,
-        title: title || rawTitle,
-        artist: artist,
-        thumbnail: thumbnail,
-        duration: 0 // 실시간 API는 길이를 주지 않으므로 0 (필요시 별도 API 호출 필요)
-      };
-    });
+  let title = cleanTitle;
+  let artist = '알 수 없음';
+
+  // 3. 제목과 가수 분리 로직
+  if (cleanTitle.includes('-')) {
+    // "제목 - 가수" 형태일 때
+    const parts = cleanTitle.split('-');
+    title = parts[0].trim();
+    artist = parts[1].trim();
+  } else {
+    // 하이픈이 없는 "제목 가수" 형태일 때 (마지막 공백 기준 분리)
+    const lastSpaceIndex = cleanTitle.lastIndexOf(' ');
+    if (lastSpaceIndex !== -1) {
+      title = cleanTitle.substring(0, lastSpaceIndex).trim();
+      artist = cleanTitle.substring(lastSpaceIndex).trim();
+    }
+  }
+
+  return {
+    id: videoId,
+    // 곡 번호가 있으면 제목 옆에 표시하도록 구성
+    title: songNo ? `${title} [${songNo}]` : title,
+    artist: artist,
+    thumbnail: thumbnail,
+    songNo: songNo // 추후 예약 리스트 관리를 위해 별도 저장
+  };
+}).filter(song => song.songNo.startsWith('KY'));
 
     res.json(songs);
   } catch (err) {
