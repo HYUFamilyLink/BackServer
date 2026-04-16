@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require('express');
 const cors    = require('cors');
 
@@ -6,6 +8,7 @@ const roomRoutes  = require('./routes/rooms');
 const songRoutes  = require('./routes/songs');
 const agoraRoutes = require('./routes/agora');
 const friendsRouter = require('./routes/friends');
+const sttRouter = require("./routes/stt");
 const app = express();
 
 app.use(cors());
@@ -18,4 +21,5 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/songs', songRoutes);
 app.use('/api/agora', agoraRoutes);
 app.use('/api/friends', friendsRouter);
+app.use("/api/stt", sttRouter);
 module.exports = app;
