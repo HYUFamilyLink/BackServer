@@ -36,7 +36,7 @@ echo ""
 
 # npm install
 echo "[3/4] 패키지 설치 중..."
-npm install
+npm install axios
 echo ""
 
 # Docker 실행

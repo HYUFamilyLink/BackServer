@@ -5,7 +5,6 @@ function generateJoinCode() {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-// 방 생성 내부 로직
 async function internalCreateRoom(hostId) {
   let joinCode;
   for (let i = 0; i < 10; i++) {
@@ -23,7 +22,6 @@ async function internalCreateRoom(hostId) {
   return rows[0];
 }
 
-// 랜덤 매칭용 빈 방 탐색
 async function findAvailableRoom() {
   const redis = getRedis();
   const { rows: rooms } = await pool.query(
@@ -40,6 +38,7 @@ async function findAvailableRoom() {
   return null;
 }
 
+// [수정] 현재 턴(차례) 정보를 포함하도록 변경
 async function buildRoomList() {
   const { rows: rooms } = await pool.query(
     `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name
@@ -49,8 +48,12 @@ async function buildRoomList() {
      ORDER BY r.created_at DESC`
   );
   const redis = getRedis();
+  
   return Promise.all(rooms.map(async (room) => {
     const participants = await redis.smembers(`room:${room.id}:participants`);
+    // Redis List에서 현재 1번(Index 0) 유저의 ID를 가져옴
+    const currentTurnId = await redis.lindex(`room:${room.id}:turn_queue`, 0);
+    
     let currentSongTitle = '준비 중';
     if (room.status === 'singing') {
       const { rows: songRows } = await pool.query(
@@ -59,13 +62,16 @@ async function buildRoomList() {
         [room.id]
       );
       if (songRows.length > 0) currentSongTitle = songRows[0].title;
-    } else if (room.status === 'result') {
-      currentSongTitle = '점수 확인 중';
     }
+
     return {
-      id: room.id, joinCode: room.join_code, status: room.status,
-      hostName: room.host_name, participantCount: participants.length,
-      currentSong: currentSongTitle
+      id: room.id, 
+      joinCode: room.join_code, 
+      status: room.status,
+      hostName: room.host_name, 
+      participantCount: participants.length,
+      currentSong: currentSongTitle,
+      currentTurnId: currentTurnId // 추가
     };
   }));
 }
@@ -120,11 +126,5 @@ async function closeRoom(req, res) {
 }
 
 module.exports = {
-  createRoom,
-  getRoom,
-  closeRoom,
-  internalCreateRoom,
-  findAvailableRoom,
-  getActiveRooms,
-  buildRoomList
+  createRoom, getRoom, closeRoom, internalCreateRoom, findAvailableRoom, getActiveRooms, buildRoomList
 };

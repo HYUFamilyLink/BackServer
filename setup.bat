@@ -39,7 +39,7 @@ echo.
 
 :: npm install
 echo [3/4] Installing packages...
-npm install
+npm install axios
 echo.
 
 :: Start Docker

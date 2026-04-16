@@ -1,7 +1,6 @@
 const { Server } = require('socket.io');
 const jwt        = require('jsonwebtoken');
 const roomHandler   = require('./handlers/roomHandler');
-const queueHandler  = require('./handlers/queueHandler');
 const lyricsHandler = require('./handlers/lyricsHandler');
 const friendHandler = require('./handlers/friendHandler'); // 추가
 
@@ -23,7 +22,6 @@ function initSocket(httpServer) {
 
   io.on('connection', (socket) => {
     roomHandler(io, socket);
-    queueHandler(io, socket);
     lyricsHandler(io, socket);
     friendHandler(io, socket); // 추가
   });
