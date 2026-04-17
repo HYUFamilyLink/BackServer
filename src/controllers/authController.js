@@ -46,7 +46,8 @@ async function register(req, res) {
 }
 
 async function login(req, res) {
-  const { name, password } = req.body;
+  //로그인 시점에서 role을 구분하기 위한 수정
+  const { name, password, role } = req.body;
   try {
     const { rows } = await pool.query('SELECT * FROM users WHERE name LIKE $1', [`${name}%`]);
     if (rows.length === 0) return res.status(401).json({ error: '정보 불일치' });
@@ -61,13 +62,18 @@ async function login(req, res) {
     }
     if (!matchedUser) return res.status(401).json({ error: '정보 불일치' });
 
+    // 수정: 입력을 안하더라도 기본값 phone 지정 (프론트/유니티 버그 방지)
+    const finalRole = role || 'phone';
+
+    // 수정: 입력에 따라 결정된 role로 토큰 생성
     const token = jwt.sign(
-      { id: matchedUser.id, nickname: matchedUser.name, role: matchedUser.role },
+      { id: matchedUser.id, nickname: matchedUser.name, role: finalRole },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
+    // 수정: 입력에 따라 결정된 role로 응답 반환
     res.json({ 
-      user: { id: matchedUser.id, nickname: matchedUser.name, role: matchedUser.role }, 
+      user: { id: matchedUser.id, nickname: matchedUser.name, role: finalRole }, 
       token 
     });
   } catch (err) {
