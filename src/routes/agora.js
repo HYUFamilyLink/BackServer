@@ -13,17 +13,18 @@ router.get('/token', authMiddleware, (req, res) => {
   const { roomId } = req.query;
   if (!roomId) return res.status(400).json({ error: 'roomId required' });
 
-  const uid       = req.user.id;
+  // req.user.id는 UUID 문자열 형태
+  const uid       = String(req.user.id); 
   const expireAt  = Math.floor(Date.now() / 1000) + TOKEN_EXPIRE_SEC;
 
-  const token = RtcTokenBuilder.buildTokenWithUid(
+  const token = RtcTokenBuilder.buildTokenWithUserAccount(
     APP_ID,
     APP_CERTIFICATE,
     String(roomId),
-    uid,
+    uid, // 문자열 계정 ID
     RtcRole.PUBLISHER,
     expireAt,
-    expireAt,
+    expireAt
   );
 
   res.json({ token, uid, appId: APP_ID });
