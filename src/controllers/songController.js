@@ -1,13 +1,13 @@
 const axios = require('axios');
 const { pool } = require('../config/database');
-
+const KY_OFFICIAL_CHANNEL_ID = 'UCDqaUIUSJP5EVMEI178Zfag';
 async function getSongs(req, res) {
   const { q } = req.query;
   
   if (!q) {
     return res.json([]);
   }
-
+  
   try {
     // 1. 유튜브 API 검색
     const searchQuery = `${q} 금영노래방 공식 유튜브 채널`;
@@ -16,22 +16,26 @@ async function getSongs(req, res) {
     const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
       params: {
         part: 'snippet',
-        q: searchQuery,
+        q: q, 
         type: 'video',
+        channelId: KY_OFFICIAL_CHANNEL_ID,
         videoEmbeddable: 'true',
         videoSyndicated: 'true',
         maxResults: 20,
         key: YOUTUBE_API_KEY
       }
     });
-
     // 2. 검색 결과 가공
-    const songs = response.data.items.map(item => {
+  const songs = response.data.items
+      .filter(item => item.snippet.channelId === KY_OFFICIAL_CHANNEL_ID)
+      .map(item => {
   const videoId = item.id.videoId;
   const rawTitle = item.snippet.title;
   const thumbnail = item.snippet.thumbnails.high.url;
-
-  // 1. 곡 번호 추출 (괄호 안의 KY.0000 또는 TJ.0000 패턴 매칭)
+  const allTags = rawTitle.match(/\[.*?\]/g) || [];
+        const filteredTags = allTags
+          .map(tag => tag.replace(/[\[\]]/g, '')) // 대괄호 제거
+          .filter(tag => !tag.includes('금영노래방'));
   const numberMatch = rawTitle.match(/\((KY|TJ)\.?\s*(\d+)\)/i);
   const songNo = numberMatch ? numberMatch[0].replace(/[()]/g, '') : ''; // 예: "KY.7463"
 
@@ -66,7 +70,8 @@ async function getSongs(req, res) {
     title: songNo ? `${title} [${songNo}]` : title,
     artist: artist,
     thumbnail: thumbnail,
-    songNo: songNo // 추후 예약 리스트 관리를 위해 별도 저장
+    songNo: songNo,
+    tags: filteredTags
   };
 }).filter(song => song.songNo.startsWith('KY'));
 

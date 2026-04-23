@@ -10,7 +10,6 @@ async function getAcceptedFriends(req, res) {
   console.log(`===========================================\n`);
 
   try {
-    // ✨ [수정] u.profile_image 추가
     const { rows } = await pool.query(
       `SELECT u.id::text, u.name as nickname, u.profile_image 
        FROM friends f
@@ -35,9 +34,7 @@ async function getAcceptedFriends(req, res) {
   }
 }
 
-/**
- * 2. 모든 관계 상태(대기/수락 등) 및 닉네임/프로필 가져오기
- */
+
 async function getFriendStatuses(req, res) {
   const userId = String(req.user.id);
   console.log(`\n[상태 API 호출됨] 로그인 유저: ${userId}`);

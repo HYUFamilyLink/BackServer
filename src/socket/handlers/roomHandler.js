@@ -14,12 +14,10 @@ async function broadcastRoomList(io) {
 module.exports = function roomHandler(io, socket) {
   const redis = getRedis();
 
-  // 1. 유저 접속 시 본인의 ID로 된 소켓 룸에 입장
   if (socket.user && socket.user.id) {
     socket.join(String(socket.user.id).trim());
   }
 
-  // [도우미] 현재 방의 상태(인원, 턴)를 전체 알림
   const emitRoomState = async (roomId, joinCode) => {
     const participantKey = `room:${roomId}:participants`;
     const turnKey = `room:${roomId}:turn_queue`;
@@ -27,42 +25,48 @@ module.exports = function roomHandler(io, socket) {
     const members = await redis.smembers(participantKey);
     const participants = members.map(m => JSON.parse(m));
     
-    // Redis List의 순서대로 정렬하기 위해 turn_queue를 가져옴
     const turnOrder = await redis.lrange(turnKey, 0, -1);
     
-    // participants 배열을 turnOrder 순서에 맞게 재정렬
     const sortedParticipants = turnOrder.map(id => 
       participants.find(p => String(p.id).trim() === String(id).trim())
     ).filter(Boolean);
 
-    // [보안 로직] 혹시라도 turn_queue와 participants 사이에 싱크가 어긋나서
-    // 명단에서 누락되는 인원이 있다면 맨 뒤에 강제로 복구해줌
     participants.forEach(p => {
       if (!sortedParticipants.find(sp => String(sp.id).trim() === String(p.id).trim())) {
         sortedParticipants.push(p);
       }
     });
 
+    // ✨ 난입 유저를 위한 현재 곡 상태 조회
+    const playingVideoStr = await redis.get(`room:${roomId}:playing_video`);
+    const playingVideo = playingVideoStr ? JSON.parse(playingVideoStr) : null;
+
+    // DB에서 정확한 방 상태 가져오기
+    const { rows } = await pool.query("SELECT status FROM rooms WHERE id = $1", [roomId]);
+    const currentStatus = rows.length > 0 ? rows[0].status : 'waiting';
+
     io.to(roomId).emit('room:state', {
       roomId,
       joinCode,
-      status: 'waiting',
+      status: currentStatus, 
       participants: sortedParticipants,
-      currentTurnId: turnOrder.length > 0 ? turnOrder[0] : null
+      currentTurnId: turnOrder.length > 0 ? turnOrder[0] : null,
+      playingVideo // 현재 재생 중인 노래 정보 동기화
     });
   };
 
-  // [도우미] 다음 사람으로 턴 넘기기
   const rotateTurn = async (roomId) => {
     const turnKey = `room:${roomId}:turn_queue`;
-    // 1. 맨 앞 사람(현재 가수)을 꺼내서
+    
+    // ✨ 차례가 넘어가면 곡 정보 폐기 및 방 상태 업데이트
+    await redis.del(`room:${roomId}:playing_video`);
+    await pool.query("UPDATE rooms SET status = 'waiting' WHERE id = $1", [roomId]);
+
     const currentSingerId = await redis.lpop(turnKey);
     if (currentSingerId) {
-      // 2. 맨 뒤로 다시 넣음
       await redis.rpush(turnKey, currentSingerId);
     }
     
-    // 3. 변경된 상태 알림
     const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
     if (rows.length > 0) {
       await emitRoomState(roomId, rows[0].join_code);
@@ -77,13 +81,11 @@ module.exports = function roomHandler(io, socket) {
     const participantKey = `room:${roomId}:participants`;
     const turnKey = `room:${roomId}:turn_queue`;
 
-    // 1. 참여자 정보 저장 (중복 제거 후 삽입)
     const existingMembers = await redis.smembers(participantKey);
     for (const m of existingMembers) {
       if (String(JSON.parse(m).id).trim() === myIdStr) await redis.srem(participantKey, m);
     }
     
-    //방 참가자 객체에 profileImage 저장
     const userData = JSON.stringify({ 
       id: myIdStr, 
       nickname: socket.user.nickname, 
@@ -94,26 +96,30 @@ module.exports = function roomHandler(io, socket) {
     await redis.sadd(participantKey, userData);
     await redis.expire(participantKey, 86400);
 
-    // 2. [턴 관리] 순서 리스트에 내 ID가 없으면 맨 뒤에 추가
     const turnOrder = await redis.lrange(turnKey, 0, -1);
     if (!turnOrder.includes(myIdStr)) {
       await redis.rpush(turnKey, myIdStr);
       await redis.expire(turnKey, 86400);
     }
 
-    // 3. 상태 알림
     await emitRoomState(roomId, joinCode);
 
-    // 입장 알림에도 profileImage
     socket.to(roomId).emit('room:user_joined', {
       id: myIdStr, 
       nickname: socket.user.nickname, 
       role: socket.user.role,
       profileImage: socket.user.profile_image || 0
     });
+    socket.on('room:request_state', async ({ roomId }) => {
+    if (!roomId) return;
+    const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
+    if (rows.length > 0) {
+      await emitRoomState(roomId, rows[0].join_code);
+    }
+    });
   };
 
-  // [이벤트] 노래 선택 완료
+  // ✨ 곡 선택 시 즉시 재생 명령 및 정보 저장
   socket.on('song:select', async ({ videoId, title, artist }) => {
     const roomId = socket.roomId;
     if (!roomId) return;
@@ -125,18 +131,16 @@ module.exports = function roomHandler(io, socket) {
       return socket.emit('error', { message: '본인의 차례가 아닙니다.' });
     }
 
-    io.to(roomId).emit('song:play', {
-      videoId,
-      title,
-      artist,
-      singerId: socket.user.id
-    });
+    const videoData = { videoId, title, artist, singerId: socket.user.id };
     
+    // 재생 정보 등록 및 상태를 바로 singing으로 변경
+    await redis.set(`room:${roomId}:playing_video`, JSON.stringify(videoData));
     await pool.query("UPDATE rooms SET status = 'singing' WHERE id = $1", [roomId]);
+
+    io.to(roomId).emit('song:play', videoData);
     await broadcastRoomList(io);
   });
 
-  // [이벤트] 수동 스킵
   socket.on('turn:skip', async () => {
     if (socket.roomId) {
       io.to(socket.roomId).emit('song:stop');
@@ -144,11 +148,22 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
-  // [이벤트] 자동 종료
   socket.on('song:end', async () => {
     if (socket.roomId) {
       io.to(socket.roomId).emit('song:stop');
       await rotateTurn(socket.roomId);
+    }
+  });
+
+  socket.on('song:request_sync', () => {
+    if (socket.roomId) {
+      socket.to(socket.roomId).emit('song:request_sync');
+    }
+  });
+
+  socket.on('song:send_sync', ({ time }) => {
+    if (socket.roomId) {
+      socket.to(socket.roomId).emit('song:receive_sync', { time });
     }
   });
 
@@ -172,7 +187,6 @@ module.exports = function roomHandler(io, socket) {
       await broadcastRoomList(io);
 
       if (invitedFriends.length > 0) {
-        // 초대장에 방장의 profileImage 포함
         const inviteData = {
           id: room.id, roomId: room.id, joinCode: room.join_code,
           hostName: socket.user.nickname,
@@ -230,6 +244,7 @@ module.exports = function roomHandler(io, socket) {
       console.error('[Socket] Send Invites Error:', err);
     }
   });
+
   socket.on('user:update_profile', async () => {
     try {
       const userId = socket.user.id;
@@ -237,16 +252,13 @@ module.exports = function roomHandler(io, socket) {
       
       if (rows.length > 0) {
         socket.user.profile_image = rows[0].profile_image;
-        console.log(`[Socket] User ${socket.user.nickname} updated profile to: ${socket.user.profile_image}`);
         io.emit('friend:update'); 
-        
         await broadcastRoomList(io);
       }
     } catch (err) {
       console.error('[Socket] Update Profile Sync Error:', err);
     }
   });
-
 };
 
 async function _leaveRoom(io, socket, redis) {
@@ -258,7 +270,6 @@ async function _leaveRoom(io, socket, redis) {
   const myIdStr = String(socket.user.id).trim();
   
   try {
-    // 1. 참여자 목록에서 제거
     const members = await redis.smembers(participantKey);
     for (const m of members) {
       if (String(JSON.parse(m).id).trim() === myIdStr) {
@@ -269,19 +280,27 @@ async function _leaveRoom(io, socket, redis) {
     const turnOrderBefore = await redis.lrange(turnKey, 0, -1);
     const wasCurrentTurn = turnOrderBefore.length > 0 && String(turnOrderBefore[0]).trim() === myIdStr;
 
-    // 2. 턴 큐(순서 리스트)에서 제거
     await redis.lrem(turnKey, 0, myIdStr);
 
     const remainingMembers = await redis.smembers(participantKey);
     
     if (remainingMembers.length === 0) {
+      // 룸 초기화 및 클리어
       await pool.query("UPDATE rooms SET status = 'closed', closed_at = NOW() WHERE id = $1", [roomId]);
       await redis.del(participantKey);
       await redis.del(turnKey);
+      await redis.del(`room:${roomId}:playing_video`);
       await broadcastRoomList(io);
     } else {
       if (wasCurrentTurn) {
         io.to(roomId).emit('song:stop');
+        await redis.del(`room:${roomId}:playing_video`);
+        await pool.query("UPDATE rooms SET status = 'waiting' WHERE id = $1", [roomId]);
+        
+        const currentSingerId = await redis.lpop(turnKey);
+        if (currentSingerId) {
+          await redis.rpush(turnKey, currentSingerId);
+        }
       }
 
       const { rows } = await pool.query("SELECT join_code FROM rooms WHERE id = $1", [roomId]);
@@ -299,11 +318,19 @@ async function _leaveRoom(io, socket, redis) {
         }
       });
 
+      const playingVideoStr = await redis.get(`room:${roomId}:playing_video`);
+      const playingVideo = playingVideoStr ? JSON.parse(playingVideoStr) : null;
+      
+      const statusRow = await pool.query("SELECT status FROM rooms WHERE id = $1", [roomId]);
+      const currentStatus = statusRow.rows.length > 0 ? statusRow.rows[0].status : 'waiting';
+
       io.to(roomId).emit('room:state', { 
         roomId,
         joinCode: rows[0]?.join_code,
+        status: currentStatus,
         participants: sortedParticipants,
-        currentTurnId: turnOrder.length > 0 ? turnOrder[0] : null
+        currentTurnId: turnOrder.length > 0 ? turnOrder[0] : null,
+        playingVideo
       });
       io.to(roomId).emit('room:user_left', { userId: myIdStr });
     }
@@ -313,5 +340,4 @@ async function _leaveRoom(io, socket, redis) {
     socket.leave(roomId);
     socket.roomId = null;
   }
-  
 }

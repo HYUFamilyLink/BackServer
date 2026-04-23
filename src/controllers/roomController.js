@@ -38,7 +38,6 @@ async function findAvailableRoom() {
   return null;
 }
 
-// [수정] 현재 턴(차례) 정보를 포함하도록 변경
 async function buildRoomList() {
   const { rows: rooms } = await pool.query(
     `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name, u.profile_image as host_profile_image
@@ -51,17 +50,16 @@ async function buildRoomList() {
   
   return Promise.all(rooms.map(async (room) => {
     const participants = await redis.smembers(`room:${room.id}:participants`);
-    // Redis List에서 현재 1번(Index 0) 유저의 ID를 가져옴
     const currentTurnId = await redis.lindex(`room:${room.id}:turn_queue`, 0);
     
-    let currentSongTitle = '준비 중';
+    let currentSongTitle = '대기 중';
+    
     if (room.status === 'singing') {
-      const { rows: songRows } = await pool.query(
-        `SELECT s.title FROM queue_items qi JOIN songs s ON qi.song_id = s.id
-         WHERE qi.room_id = $1 AND qi.played = FALSE ORDER BY qi.position ASC LIMIT 1`,
-        [room.id]
-      );
-      if (songRows.length > 0) currentSongTitle = songRows[0].title;
+      const playingVideoStr = await redis.get(`room:${room.id}:playing_video`);
+      if (playingVideoStr) {
+        const playingVideo = JSON.parse(playingVideoStr);
+        currentSongTitle = `${playingVideo.title}`;
+      }
     }
 
     return {
@@ -69,10 +67,10 @@ async function buildRoomList() {
       joinCode: room.join_code, 
       status: room.status,
       hostName: room.host_name, 
-      hostProfileImage: room.host_profile_image,
+      hostProfileImage: room.host_profile_image, 
       participantCount: participants.length,
       currentSong: currentSongTitle,
-      currentTurnId: currentTurnId // 추가
+      currentTurnId: currentTurnId
     };
   }));
 }
@@ -106,7 +104,12 @@ async function getRoom(req, res) {
       [joinCode.toUpperCase()]
     );
     if (!rows.length) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
-    res.json(rows[0]);
+    
+    const roomData = {
+      ...rows[0],
+      hostProfileImage: rows[0].host_profile_image
+    };
+    res.json(roomData);
   } catch (err) {
     res.status(500).json({ error: '서버 오류' });
   }
