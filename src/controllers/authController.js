@@ -10,8 +10,7 @@ async function register(req, res) {
 
   try {
     const validRole = ['vr', 'phone'].includes(role) ? role : 'phone';
-    // DB 컬럼명은 name을 사용
-    // 동일 name + role 조합은 중복 가입 차단 (PIN 무관)
+    
     const { rows: existingUsers } = await pool.query(
       'SELECT name FROM users WHERE name = $1 AND role = $2',
       [name, validRole]
@@ -21,23 +20,23 @@ async function register(req, res) {
     }
 
     const finalName = name;
-
     const hashed = await bcrypt.hash(password, 10);
+    
+    // ✨ [수정] RETURNING에 profile_image 추가 (기본값 0)
     const { rows } = await pool.query(
-      `INSERT INTO users (name, pin, role) VALUES ($1, $2, $3) RETURNING id, name, role`,
+      `INSERT INTO users (name, pin, role) VALUES ($1, $2, $3) RETURNING id, name, role, profile_image`,
       [finalName, hashed, validRole]
     );
 
     const user = rows[0];
     const token = jwt.sign(
-      { id: user.id, nickname: user.name, role: user.role }, // 토큰 안에서도 nickname으로 통일
+      { id: user.id, nickname: user.name, role: user.role, profile_image: user.profile_image }, 
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
 
-    // 프론트엔드 호환을 위해 nickname으로 반환
     res.status(201).json({ 
-      user: { id: user.id, nickname: user.name, role: user.role }, 
+      user: { id: user.id, nickname: user.name, role: user.role, profileImage: user.profile_image }, 
       token 
     });
   } catch (err) {
@@ -46,9 +45,9 @@ async function register(req, res) {
 }
 
 async function login(req, res) {
-  //로그인 시점에서 role을 구분하기 위한 수정
   const { name, password, role } = req.body;
   try {
+    // ✨ [수정] DB에서 profile_image도 함께 가져옴
     const { rows } = await pool.query('SELECT * FROM users WHERE name LIKE $1', [`${name}%`]);
     if (rows.length === 0) return res.status(401).json({ error: '정보 불일치' });
 
@@ -62,18 +61,17 @@ async function login(req, res) {
     }
     if (!matchedUser) return res.status(401).json({ error: '정보 불일치' });
 
-    // 수정: 입력을 안하더라도 기본값 phone 지정 (프론트/유니티 버그 방지)
     const finalRole = role || 'phone';
 
-    // 수정: 입력에 따라 결정된 role로 토큰 생성
+    // ✨ [수정] 토큰 및 응답 객체에 profile_image 추가
     const token = jwt.sign(
-      { id: matchedUser.id, nickname: matchedUser.name, role: finalRole },
+      { id: matchedUser.id, nickname: matchedUser.name, role: finalRole, profile_image: matchedUser.profile_image },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
-    // 수정: 입력에 따라 결정된 role로 응답 반환
+    
     res.json({ 
-      user: { id: matchedUser.id, nickname: matchedUser.name, role: finalRole }, 
+      user: { id: matchedUser.id, nickname: matchedUser.name, role: finalRole, profileImage: matchedUser.profile_image }, 
       token 
     });
   } catch (err) {
@@ -81,4 +79,25 @@ async function login(req, res) {
   }
 }
 
-module.exports = { register, login };
+// ✨ [신규 추가] 프로필 사진 변경 API
+async function updateProfile(req, res) {
+  const { profileImage } = req.body; // 1~12 사이의 숫자
+  const userId = req.user.id;
+
+  if (profileImage < 1 || profileImage > 12) {
+    return res.status(400).json({ error: '유효하지 않은 프로필 번호입니다.' });
+  }
+
+  try {
+    await pool.query(
+      'UPDATE users SET profile_image = $1 WHERE id = $2',
+      [profileImage, userId]
+    );
+    res.json({ success: true, profileImage });
+  } catch (err) {
+    console.error('[Profile Update Error]', err);
+    res.status(500).json({ error: '프로필 업데이트 실패' });
+  }
+}
+
+module.exports = { register, login, updateProfile }; 

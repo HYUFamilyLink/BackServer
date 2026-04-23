@@ -1,4 +1,3 @@
-// controllers/friendController.js
 const { pool } = require('../config/database');
 
 /**
@@ -11,8 +10,9 @@ async function getAcceptedFriends(req, res) {
   console.log(`===========================================\n`);
 
   try {
+    // ✨ [수정] u.profile_image 추가
     const { rows } = await pool.query(
-      `SELECT u.id::text, u.name as nickname 
+      `SELECT u.id::text, u.name as nickname, u.profile_image 
        FROM friends f
        JOIN users u ON (
          CASE 
@@ -26,7 +26,9 @@ async function getAcceptedFriends(req, res) {
     );
 
     console.log(`[명단 API 결과] 조회된 친구 수: ${rows.length}명`);
-    res.json(rows);
+    // profile_image를 낙타표기법(profileImage)으로 변환해서 보내주면 프론트에서 편합니다.
+    const formattedRows = rows.map(r => ({ ...r, profileImage: r.profile_image }));
+    res.json(formattedRows);
   } catch (err) {
     console.error('[명단 API 에러]', err);
     res.status(500).json({ error: '목록 로드 실패' });
@@ -34,17 +36,17 @@ async function getAcceptedFriends(req, res) {
 }
 
 /**
- * 2. 모든 관계 상태(대기/수락 등) 및 닉네임 가져오기
+ * 2. 모든 관계 상태(대기/수락 등) 및 닉네임/프로필 가져오기
  */
 async function getFriendStatuses(req, res) {
   const userId = String(req.user.id);
   console.log(`\n[상태 API 호출됨] 로그인 유저: ${userId}`);
 
   try {
-    // users 테이블을 조인하여 닉네임을 함께 가져옴
     const { rows } = await pool.query(
       `SELECT f.requester_id::text, f.receiver_id::text, f.status,
-              u_req.name as req_name, u_rec.name as rec_name
+              u_req.name as req_name, u_req.profile_image as req_profile,
+              u_rec.name as rec_name, u_rec.profile_image as rec_profile
        FROM friends f
        JOIN users u_req ON f.requester_id = u_req.id
        JOIN users u_rec ON f.receiver_id = u_rec.id
@@ -60,13 +62,13 @@ async function getFriendStatuses(req, res) {
       
       const targetId = isIRequested ? row.receiver_id : row.requester_id;
       const targetName = isIRequested ? row.rec_name : row.req_name;
+      const targetProfile = isIRequested ? row.rec_profile : row.req_profile; // ✨ 프로필 이미지 할당
       
       let statusVal = '';
       if (rowStatus === 'accepted') statusVal = 'friend';
       else if (rowStatus === 'pending') statusVal = isIRequested ? 'sent' : 'received';
 
-      // 상태값과 닉네임을 객체로 묶어 프론트엔드로 전달
-      statuses[targetId] = { status: statusVal, nickname: targetName };
+      statuses[targetId] = { status: statusVal, nickname: targetName, profileImage: targetProfile };
     });
 
     console.log(`[상태 API 결과] 상태 맵:`, statuses);
@@ -76,6 +78,4 @@ async function getFriendStatuses(req, res) {
     res.status(500).json({ error: '상태 로드 실패' });
   }
 }
-
-// [핵심] 이 부분이 지워져서 라우터가 함수를 찾지 못하고 크래시가 났던 것입니다.
 module.exports = { getAcceptedFriends, getFriendStatuses };

@@ -35,7 +35,7 @@ module.exports = function roomHandler(io, socket) {
       participants.find(p => String(p.id).trim() === String(id).trim())
     ).filter(Boolean);
 
-    // ✨ [보안 로직] 혹시라도 turn_queue와 participants 사이에 싱크가 어긋나서
+    // [보안 로직] 혹시라도 turn_queue와 participants 사이에 싱크가 어긋나서
     // 명단에서 누락되는 인원이 있다면 맨 뒤에 강제로 복구해줌
     participants.forEach(p => {
       if (!sortedParticipants.find(sp => String(sp.id).trim() === String(p.id).trim())) {
@@ -82,7 +82,15 @@ module.exports = function roomHandler(io, socket) {
     for (const m of existingMembers) {
       if (String(JSON.parse(m).id).trim() === myIdStr) await redis.srem(participantKey, m);
     }
-    const userData = JSON.stringify({ id: myIdStr, nickname: socket.user.nickname, role: socket.user.role });
+    
+    //방 참가자 객체에 profileImage 저장
+    const userData = JSON.stringify({ 
+      id: myIdStr, 
+      nickname: socket.user.nickname, 
+      role: socket.user.role,
+      profileImage: socket.user.profile_image || 0
+    });
+    
     await redis.sadd(participantKey, userData);
     await redis.expire(participantKey, 86400);
 
@@ -96,12 +104,16 @@ module.exports = function roomHandler(io, socket) {
     // 3. 상태 알림
     await emitRoomState(roomId, joinCode);
 
+    // 입장 알림에도 profileImage
     socket.to(roomId).emit('room:user_joined', {
-      id: myIdStr, nickname: socket.user.nickname, role: socket.user.role
+      id: myIdStr, 
+      nickname: socket.user.nickname, 
+      role: socket.user.role,
+      profileImage: socket.user.profile_image || 0
     });
   };
 
-  // [이벤트] 노래 선택 완료 (노래방 API 검색 후 유튜브 코드를 받았을 때)
+  // [이벤트] 노래 선택 완료
   socket.on('song:select', async ({ videoId, title, artist }) => {
     const roomId = socket.roomId;
     if (!roomId) return;
@@ -124,7 +136,7 @@ module.exports = function roomHandler(io, socket) {
     await broadcastRoomList(io);
   });
 
-  // [이벤트] 수동 스킵 (가수가 직접 넘기기 눌렀을 때)
+  // [이벤트] 수동 스킵
   socket.on('turn:skip', async () => {
     if (socket.roomId) {
       io.to(socket.roomId).emit('song:stop');
@@ -132,10 +144,9 @@ module.exports = function roomHandler(io, socket) {
     }
   });
 
-  // ✨ [핵심 수정] 자동 종료 (노래가 자연스럽게 끝났을 때)
+  // [이벤트] 자동 종료
   socket.on('song:end', async () => {
     if (socket.roomId) {
-      // 턴만 넘기는 게 아니라, 반드시 방 전체에 정지 신호를 뿌려야 관객들도 멈춥니다.
       io.to(socket.roomId).emit('song:stop');
       await rotateTurn(socket.roomId);
     }
@@ -161,9 +172,12 @@ module.exports = function roomHandler(io, socket) {
       await broadcastRoomList(io);
 
       if (invitedFriends.length > 0) {
+        // 초대장에 방장의 profileImage 포함
         const inviteData = {
           id: room.id, roomId: room.id, joinCode: room.join_code,
-          hostName: socket.user.nickname, currentSong: '대기 중', participantCount: 1
+          hostName: socket.user.nickname,
+          hostProfileImage: socket.user.profile_image || 0,
+          currentSong: '대기 중', participantCount: 1
         };
         invitedFriends.forEach(friendId => {
           io.to(String(friendId).trim()).emit('room:invite', inviteData);
@@ -201,10 +215,15 @@ module.exports = function roomHandler(io, socket) {
     try {
       const { invitedFriends = [], roomId, joinCode, currentSong, participantCount } = payload;
       if (!invitedFriends.length) return;
+      
+      // ✨ [수정] 기존 방에서 초대장 보낼 때 방장의 profileImage 포함
       const inviteData = {
-        id: roomId, roomId, joinCode, hostName: socket.user.nickname,
+        id: roomId, roomId, joinCode, 
+        hostName: socket.user.nickname,
+        hostProfileImage: socket.user.profile_image || 0,
         currentSong, participantCount
       };
+      
       invitedFriends.forEach(friendId => {
         io.to(String(friendId).trim()).emit('room:invite', inviteData);
       });
@@ -231,7 +250,6 @@ async function _leaveRoom(io, socket, redis) {
       }
     }
 
-    // ✨ [가수 탈주 방어] 나가는 사람이 혹시 현재 노래 부르던 사람인지 파악
     const turnOrderBefore = await redis.lrange(turnKey, 0, -1);
     const wasCurrentTurn = turnOrderBefore.length > 0 && String(turnOrderBefore[0]).trim() === myIdStr;
 
@@ -246,7 +264,6 @@ async function _leaveRoom(io, socket, redis) {
       await redis.del(turnKey);
       await broadcastRoomList(io);
     } else {
-      // 나간 사람이 가수였다면 남은 사람들의 화면도 정지시켜줘야 턴이 꼬이지 않음
       if (wasCurrentTurn) {
         io.to(roomId).emit('song:stop');
       }
@@ -260,7 +277,6 @@ async function _leaveRoom(io, socket, redis) {
         participants.find(p => String(p.id).trim() === String(id).trim())
       ).filter(Boolean);
 
-      // 명단 누락 복구
       participants.forEach(p => {
         if (!sortedParticipants.find(sp => String(sp.id).trim() === String(p.id).trim())) {
           sortedParticipants.push(p);

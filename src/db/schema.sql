@@ -7,11 +7,13 @@ CREATE TABLE IF NOT EXISTS users (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   name       VARCHAR(32) UNIQUE NOT NULL,  -- 로그인 아이디 겸 표시 이름 (예: 김순자, 김순자A)
   pin        VARCHAR(128) NOT NULL,        -- 4자리 생년월일 (bcrypt 등으로 암호화 저장 권장)
+  
   role       VARCHAR(8)  NOT NULL DEFAULT 'phone'  
                          CHECK (role IN ('vr', 'phone')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
+ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image INTEGER DEFAULT 0;
+ALTER TABLE users ADD CONSTRAINT check_profile_range CHECK (profile_image BETWEEN 0 AND 12);
 CREATE TABLE IF NOT EXISTS friends (
   id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   requester_id UUID        NOT NULL REFERENCES users(id),
