@@ -63,7 +63,6 @@ async function login(req, res) {
 
     const finalRole = role || 'phone';
 
-    // ✨ [수정] 토큰 및 응답 객체에 profile_image 추가
     const token = jwt.sign(
       { id: matchedUser.id, nickname: matchedUser.name, role: finalRole, profile_image: matchedUser.profile_image },
       process.env.JWT_SECRET,
@@ -79,24 +78,62 @@ async function login(req, res) {
   }
 }
 
-// ✨ [신규 추가] 프로필 사진 변경 API
 async function updateProfile(req, res) {
-  const { profileImage } = req.body; // 1~12 사이의 숫자
+  const { profileImage } = req.body; 
   const userId = req.user.id;
 
-  if (profileImage < 1 || profileImage > 12) {
+  // 1. 요청 데이터 확인 로그
+  console.log(`[Profile Update Attempt] UserID: ${userId}, ChosenIndex: ${profileImage}`);
+
+  // 유효성 검사 (0은 미선택이므로 1~12만 허용)
+  if (!profileImage || profileImage < 1 || profileImage > 12) {
+    console.log(`[Profile Update Refused] Invalid profile index: ${profileImage}`);
     return res.status(400).json({ error: '유효하지 않은 프로필 번호입니다.' });
   }
 
   try {
-    await pool.query(
-      'UPDATE users SET profile_image = $1 WHERE id = $2',
+    // 2. DB 업데이트 실행
+    const result = await pool.query(
+      'UPDATE users SET profile_image = $1 WHERE id = $2::uuid RETURNING id, name, role, profile_image',
       [profileImage, userId]
     );
-    res.json({ success: true, profileImage });
+
+    // 3. 업데이트 결과 확인
+    if (result.rows.length === 0) {
+      console.log(`[Profile Update Failed] No user found with ID: ${userId}`);
+      return res.status(404).json({ error: '유저를 찾을 수 없습니다.' });
+    }
+
+    const updatedUser = result.rows[0];
+    console.log(`[Profile Update Success] User: ${updatedUser.name}, NewImage: ${updatedUser.profile_image}`);
+
+    // 4. 새 정보를 담은 토큰 발행 (새로고침 시 유지용)
+    const newToken = jwt.sign(
+      { 
+        id: updatedUser.id, 
+        nickname: updatedUser.name, 
+        role: updatedUser.role, 
+        profile_image: updatedUser.profile_image 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN }
+    );
+
+    // 5. 프론트엔드 응답 (변수명을 AuthStore와 일치시킴: profileImage)
+    res.json({ 
+      success: true, 
+      user: { 
+        id: updatedUser.id, 
+        nickname: updatedUser.name, 
+        role: updatedUser.role, 
+        profileImage: updatedUser.profile_image 
+      },
+      token: newToken 
+    });
+
   } catch (err) {
-    console.error('[Profile Update Error]', err);
-    res.status(500).json({ error: '프로필 업데이트 실패' });
+    console.error('[Profile Update Critical Error]', err);
+    res.status(500).json({ error: '서버 오류로 프로필 업데이트 실패' });
   }
 }
 

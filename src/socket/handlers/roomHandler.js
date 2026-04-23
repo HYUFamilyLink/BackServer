@@ -215,8 +215,7 @@ module.exports = function roomHandler(io, socket) {
     try {
       const { invitedFriends = [], roomId, joinCode, currentSong, participantCount } = payload;
       if (!invitedFriends.length) return;
-      
-      // ✨ [수정] 기존 방에서 초대장 보낼 때 방장의 profileImage 포함
+
       const inviteData = {
         id: roomId, roomId, joinCode, 
         hostName: socket.user.nickname,
@@ -231,6 +230,23 @@ module.exports = function roomHandler(io, socket) {
       console.error('[Socket] Send Invites Error:', err);
     }
   });
+  socket.on('user:update_profile', async () => {
+    try {
+      const userId = socket.user.id;
+      const { rows } = await pool.query('SELECT profile_image FROM users WHERE id = $1', [userId]);
+      
+      if (rows.length > 0) {
+        socket.user.profile_image = rows[0].profile_image;
+        console.log(`[Socket] User ${socket.user.nickname} updated profile to: ${socket.user.profile_image}`);
+        io.emit('friend:update'); 
+        
+        await broadcastRoomList(io);
+      }
+    } catch (err) {
+      console.error('[Socket] Update Profile Sync Error:', err);
+    }
+  });
+
 };
 
 async function _leaveRoom(io, socket, redis) {
@@ -297,4 +313,5 @@ async function _leaveRoom(io, socket, redis) {
     socket.leave(roomId);
     socket.roomId = null;
   }
+  
 }

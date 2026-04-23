@@ -62,7 +62,6 @@ module.exports = function friendHandler(io, socket) {
         [tId, myId]
       );
       
-      // [핵심 복구] 수락 완료 시 'friend' 상태 전달
       io.to(tId).emit('friend:update', { fromId: myId, status: 'friend' });
       socket.emit('friend:update', { fromId: tId, status: 'friend' });
     } catch (err) { 
