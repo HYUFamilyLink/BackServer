@@ -41,7 +41,7 @@ async function findAvailableRoom() {
 // [수정] 현재 턴(차례) 정보를 포함하도록 변경
 async function buildRoomList() {
   const { rows: rooms } = await pool.query(
-    `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name
+    `SELECT r.id, r.join_code, r.status, r.created_at, u.name as host_name, u.profile_image as host_profile_image
      FROM rooms r
      JOIN users u ON r.host_id = u.id
      WHERE r.status != 'closed'
@@ -69,6 +69,7 @@ async function buildRoomList() {
       joinCode: room.join_code, 
       status: room.status,
       hostName: room.host_name, 
+      hostProfileImage: room.host_profile_image,
       participantCount: participants.length,
       currentSong: currentSongTitle,
       currentTurnId: currentTurnId // 추가
@@ -98,7 +99,7 @@ async function getRoom(req, res) {
   const { joinCode } = req.params;
   try {
     const { rows } = await pool.query(
-      `SELECT r.*, u.name AS host_name
+      `SELECT r.*, u.name AS host_name, u.profile_image AS host_profile_image
        FROM rooms r
        JOIN users u ON r.host_id = u.id
        WHERE r.join_code = $1 AND r.status != 'closed'`,
