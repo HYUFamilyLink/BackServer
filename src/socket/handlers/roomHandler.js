@@ -131,8 +131,8 @@ module.exports = function roomHandler(io, socket) {
       return socket.emit('error', { message: '본인의 차례가 아닙니다.' });
     }
 
-    const videoData = { videoId, title, artist, singerId: socket.user.id };
-    
+    const videoData = { videoId, title, artist, singerId: socket.user.id, startAt: Date.now() };
+
     // 재생 정보 등록 및 상태를 바로 singing으로 변경
     await redis.set(`room:${roomId}:playing_video`, JSON.stringify(videoData));
     await pool.query("UPDATE rooms SET status = 'singing' WHERE id = $1", [roomId]);
