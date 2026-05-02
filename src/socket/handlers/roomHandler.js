@@ -166,7 +166,7 @@ module.exports = function roomHandler(io, socket) {
       socket.to(socket.roomId).emit('song:receive_sync', { time });
     }
   });
-
+  
   socket.on('room:match', async () => {
     try {
       let room = await findAvailableRoom();

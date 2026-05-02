@@ -17,14 +17,15 @@ module.exports = function lyricsHandler(io, socket) {
     socket.to(roomId).emit('lyrics:tick', { currentMs });
   });
 
-  socket.on('user:reaction', ({ emoji } = {}) => {
+  socket.on('user:reaction', (data = {}) => {
     const roomId = socket.roomId;
     if (!roomId) return;
 
     io.to(roomId).emit('user:reaction', {
       userId:   socket.user.id,
       nickname: socket.user.nickname, 
-      emoji,
+      emoji: data.emoji,
+      reactionId: data.reactionId, 
     });
   });
 
