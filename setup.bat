@@ -39,7 +39,9 @@ echo.
 
 :: npm install
 echo [3/4] Installing packages...
-npm install axios
+call npm install
+call npm install axios
+call npm install agora-token
 echo.
 
 :: Start Docker

@@ -259,6 +259,16 @@ module.exports = function roomHandler(io, socket) {
       console.error('[Socket] Update Profile Sync Error:', err);
     }
   });
+  socket.on('voice:mute_toggle', ({ isMicOn }) => {
+    if (socket.roomId) {
+      // 본인을 제외한 방 안의 다른 클라이언트들에게 내 상태를 알림
+      socket.to(socket.roomId).emit('voice:mute_status', {
+        userId: String(socket.user.id).trim(),
+        isMicOn
+      });
+    }
+  });
+
 };
 
 async function _leaveRoom(io, socket, redis) {
