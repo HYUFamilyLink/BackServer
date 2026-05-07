@@ -87,11 +87,12 @@ module.exports = function roomHandler(io, socket) {
     }
     
     const userData = JSON.stringify({ 
-      id: myIdStr, 
-      nickname: socket.user.nickname, 
-      role: socket.user.role,
-      profileImage: socket.user.profile_image || 0
-    });
+  id: myIdStr, 
+  nickname: socket.user.nickname, 
+  role: socket.user.role,
+  profileImage: socket.user.profile_image || 0,
+  isMicOn: true
+});
     
     await redis.sadd(participantKey, userData);
     await redis.expire(participantKey, 86400);
@@ -259,15 +260,36 @@ module.exports = function roomHandler(io, socket) {
       console.error('[Socket] Update Profile Sync Error:', err);
     }
   });
-  socket.on('voice:mute_toggle', ({ isMicOn }) => {
-    if (socket.roomId) {
-      // 본인을 제외한 방 안의 다른 클라이언트들에게 내 상태를 알림
-      socket.to(socket.roomId).emit('voice:mute_status', {
-        userId: String(socket.user.id).trim(),
-        isMicOn
-      });
+  socket.on('voice:mute_toggle', async ({ isMicOn }) => {
+  if (socket.roomId) {
+    const myIdStr = String(socket.user.id).trim();
+
+    // 1. 현재 방에 있는 사람들에게 실시간 알림
+    socket.to(socket.roomId).emit('voice:mute_status', {
+      userId: myIdStr,
+      isMicOn
+    });
+    try {
+      const participantKey = `room:${socket.roomId}:participants`;
+      const members = await redis.smembers(participantKey);
+      
+      for (const m of members) {
+        const parsedData = JSON.parse(m);
+        if (String(parsedData.id).trim() === myIdStr) {
+          // 기존 데이터 삭제
+          await redis.srem(participantKey, m);
+          
+          // 마이크 상태 덮어쓰기 및 재저장
+          parsedData.isMicOn = isMicOn;
+          await redis.sadd(participantKey, JSON.stringify(parsedData));
+          break; // 내 정보 찾았으니 반복문 종료
+        }
+      }
+    } catch (err) {
+      console.error('[Socket] voice:mute_toggle Redis Update Error:', err);
     }
-  });
+  }
+});
 
 };
 
