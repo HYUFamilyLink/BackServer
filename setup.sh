@@ -1,57 +1,82 @@
-#!/bin/bash
-
-echo ""
-echo "========================================"
-echo "  FamilyLink Backend - 환경 설치"
-echo "========================================"
-echo ""
-
-# Node.js 설치 확인
-if ! command -v node &> /dev/null; then
-    echo "[오류] Node.js가 설치되어 있지 않습니다."
-    echo "https://nodejs.org 에서 설치 후 다시 실행해주세요."
-    exit 1
-fi
-
-# Docker 설치 확인
-if ! command -v docker &> /dev/null; then
-    echo "[오류] Docker가 설치되어 있지 않습니다."
-    echo "https://www.docker.com 에서 설치 후 다시 실행해주세요."
-    exit 1
-fi
-
-echo "[1/4] Node.js, Docker 확인 완료"
-echo ""
-
-# .env 파일 생성
-if [ ! -f ".env" ]; then
-    echo "[2/4] .env 파일 생성 중..."
-    cp .env.example .env
-    echo "      .env 파일이 생성되었습니다."
-    echo "      [필수] .env 파일을 열어 JWT_SECRET, DB_PASSWORD 값을 변경하세요."
-else
-    echo "[2/4] .env 파일이 이미 존재합니다. 건너뜀."
-fi
-echo ""
-
-# npm install
-echo "[3/4] 패키지 설치 중..."
-call npm install
-call npm install axios
-call npm install agora-token
+@echo off
 echo.
-echo ""
+echo ========================================
+echo   FamilyLink Backend ^& AI - Setup
+echo ========================================
+echo.
 
-# Docker 실행
-echo "[4/4] Docker 컨테이너 시작 중 (PostgreSQL + Redis)..."
+:: Check Node.js
+where node >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Node.js is not installed.
+    echo Please install it from https://nodejs.org
+    pause
+    exit /b 1
+)
+
+:: Check Docker
+where docker >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Docker is not installed.
+    echo Please install it from https://www.docker.com
+    pause
+    exit /b 1
+)
+
+:: Check Python (AI 서버용)
+where python >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Python is not installed.
+    echo Please install it from https://www.python.org
+    pause
+    exit /b 1
+)
+
+echo [1/5] Node.js, Docker, and Python OK
+echo.
+
+:: Create .env file
+if not exist ".env" (
+    echo [2/5] Creating .env file...
+    copy ".env.example" ".env" > nul
+    echo       .env file created.
+    echo       [REQUIRED] Open .env and change JWT_SECRET and DB_PASSWORD
+) else (
+    echo [2/5] .env already exists. Skipping.
+)
+echo.
+
+:: npm install
+echo [3/5] Installing Node packages...
+call npm install
+call npm install axios form-data agora-token multer
+echo.
+
+:: Python AI Server Setup
+echo [4/5] Setting up Python AI Server...
+if not exist "ai-server" mkdir "ai-server"
+cd ai-server
+if not exist "venv" (
+    echo Creating virtual environment...
+    python -m venv venv
+)
+echo Installing Python packages...
+call venv\Scripts\activate
+pip install fastapi uvicorn python-multipart openai-whisper demucs torch
+cd ..
+echo.
+
+:: Start Docker
+echo [5/5] Starting Docker containers (PostgreSQL + Redis)...
 docker-compose up -d
-echo ""
+echo.
 
-echo "========================================"
-echo "  설치 완료!"
-echo "========================================"
-echo ""
-echo "  [필수] .env 파일에서 JWT_SECRET, DB_PASSWORD를 반드시 변경하세요."
-echo ""
-echo "  개발 서버 실행: ./start.sh"
-echo ""
+echo ========================================
+echo   Setup complete!
+echo ========================================
+echo.
+echo   [REQUIRED] Edit .env and change JWT_SECRET and DB_PASSWORD
+echo.
+echo   To start dev server: start.bat
+echo.
+pause

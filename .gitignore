@@ -6,3 +6,9 @@ logs/
 coverage/
 .DS_Store
 uploads/
+ai-server/venv/
+ai-server/__pycache__/
+ai-server/**/*.pyc
+ai-server/**/*.pyo
+ai-server/**/*.pyd
+ai-server/.env
