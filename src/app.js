@@ -56,3 +56,5 @@ app.get('/api/agora/token', (req, res) => {
     res.status(500).json({ error: 'Failed to generate token' });
   }
 });
+const aiRouter = require('./routes/ai');
+app.use('/api/ai', aiRouter);
