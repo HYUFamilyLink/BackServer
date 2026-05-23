@@ -88,7 +88,7 @@ module.exports = function roomHandler(io, socket) {
       await emitRoomState(roomId, rows[0].join_code);
     }
 
-    // ✨ 턴이 넘어갔을 때 다음 차례 사용자에게 TTS 안내 방송
+    // 턴이 넘어갔을 때 다음 차례 사용자에게 TTS 안내 방송
     const nextSingerId = await redis.lindex(turnKey, 0);
     if (nextSingerId) {
       const participantKey = `room:${roomId}:participants`;
@@ -96,7 +96,7 @@ module.exports = function roomHandler(io, socket) {
       const nextSinger = members.map(m => JSON.parse(m)).find(p => String(p.id).trim() === String(nextSingerId).trim());
       
       if (nextSinger) {
-        const text = `${nextSinger.nickname}님의 턴입니다. 노래 검색 버튼을 눌러 MR을 선택해 주세요.`;
+        const text = `${nextSinger.nickname}님의 차례입니다. 노래 고르기 버튼을 눌러 부를 노래를 선택해 주세요.`;
         await broadcastAnnounce(io, roomId, text);
       }
     }
@@ -137,11 +137,14 @@ module.exports = function roomHandler(io, socket) {
 
     await emitRoomState(roomId, joinCode);
 
-    // ✨ 아무도 없는 방에 혼자 들어왔을 때 즉시 턴 안내 방송
+    // ✨ 유저 입장 안내방송 통합 처리 (음성 겹침 방지)
+    let announceText = `${socket.user.nickname}님이 입장하셨습니다.`;
+    
+    // 만약 이 유저가 방에 처음 들어온 사람이라면, 입장 멘트 뒤에 바로 턴 안내를 붙여서 자연스럽게 읽도록 처리
     if (isFirstUser) {
-      const text = `${socket.user.nickname}님의 턴입니다. 노래 검색 버튼을 눌러 MR을 선택해 주세요.`;
-      await broadcastAnnounce(io, roomId, text);
+      announceText += ` 현재 ${socket.user.nickname}님의 차례입니다. 노래 고르기 버튼을 눌러 노래를 선택해 주세요.`;
     }
+    await broadcastAnnounce(io, roomId, announceText);
 
     socket.to(roomId).emit('room:user_joined', {
       id: myIdStr, 
@@ -178,8 +181,8 @@ module.exports = function roomHandler(io, socket) {
     io.to(roomId).emit('song:play', videoData);
     await broadcastRoomList(io);
 
-    // ✨ 노래 선택(시작) 시 노래 제목 TTS 방송
-    await broadcastAnnounce(io, roomId, `${title}`);
+    //노래 선택(시작) 시 노래 제목 TTS 방송
+    await broadcastAnnounce(io, roomId, `${artist.replace(/\[.*?\]|\(.*?\)/g, '').trim()}의 ${title.replace(/\[.*?\]|\(.*?\)/g, '').trim()} 노래 시작`);
   });
 
   socket.on('turn:skip', async () => {
@@ -374,8 +377,8 @@ async function _leaveRoom(io, socket, redis) {
         if (nextSingerId) {
           const nextSinger = remainingMembers.map(m => JSON.parse(m)).find(p => String(p.id).trim() === String(nextSingerId).trim());
           if (nextSinger) {
-            const text = `${nextSinger.nickname}님의 턴입니다. 노래 검색 버튼을 눌러 MR을 선택해 주세요.`;
-            await broadcastAnnounce(io, roomId, text); // 호이스팅으로 인해 호출 가능
+            const text = `${nextSinger.nickname}님의 차례입니다. 노래 고르기 버튼을 눌러 부를 노래를 선택해 주세요.`;
+            await broadcastAnnounce(io, roomId, text); 
           }
         }
       }
