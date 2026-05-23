@@ -137,7 +137,7 @@ module.exports = function roomHandler(io, socket) {
 
     await emitRoomState(roomId, joinCode);
 
-    // ✨ 유저 입장 안내방송 통합 처리 (음성 겹침 방지)
+    // 유저 입장 안내방송 통합 처리 (음성 겹침 방지)
     let announceText = `${socket.user.nickname}님이 입장하셨습니다.`;
     
     // 만약 이 유저가 방에 처음 들어온 사람이라면, 입장 멘트 뒤에 바로 턴 안내를 붙여서 자연스럽게 읽도록 처리
@@ -363,6 +363,8 @@ async function _leaveRoom(io, socket, redis) {
       await redis.del(`room:${roomId}:playing_video`);
       await broadcastRoomList(io);
     } else {
+      let announceText = `${socket.user.nickname}님이 퇴장하셨습니다.`;
+      await broadcastAnnounce(io, socket.roomId, announceText);
       if (wasCurrentTurn) {
         io.to(roomId).emit('song:stop');
         await redis.del(`room:${roomId}:playing_video`);
