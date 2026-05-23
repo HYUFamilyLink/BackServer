@@ -49,7 +49,7 @@ echo.
 :: npm install
 echo [3/5] Installing Node packages...
 call npm install
-call npm install axios form-data agora-token multer
+call npm install axios form-data agora-token multer google-tts-api
 echo.
 
 :: Python AI Server Setup
