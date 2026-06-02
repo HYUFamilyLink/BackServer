@@ -33,12 +33,12 @@ async function transcribeAudio(req, res) {
     // 전송 완료 후 임시 파일 삭제
     fs.unlinkSync(filePath);
 
-    console.log(`[Node] AI 변환 완료: ${response.data.text}`);
+    const firstWord = response.data.text.trim().split(/[\s,。.]+/)[0];
+    console.log(`[Node] AI 변환 완료: ${firstWord}`);
 
-    // 5. 프론트엔드(VR)로 텍스트 반환
-    return res.json({ 
-      success: true, 
-      text: response.data.text 
+    return res.json({
+      success: true,
+      text: firstWord
     });
 
   } catch (error) {

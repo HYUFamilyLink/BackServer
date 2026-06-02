@@ -26,7 +26,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
             model="whisper-1",
             file=(file.filename, audio_bytes),
             language="ko",
-            prompt="사용자의 이름입니다. 예: 함승열, 김민수, 이철수, 박지수"
+            prompt="한 사람의 한국어 이름 하나만 말합니다. 이름 외의 다른 말은 없습니다."
         )
         return {"status": "success", "text": transcript.text}
     except Exception as e:
