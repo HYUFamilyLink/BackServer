@@ -26,9 +26,12 @@ async def transcribe_audio(file: UploadFile = File(...)):
             model="whisper-1",
             file=(file.filename, audio_bytes),
             language="ko",
-            prompt="한 사람의 한국어 이름 하나만 말합니다. 이름 외의 다른 말은 없습니다."
+            prompt="김철수, 이영희, 박민준"
         )
-        return {"status": "success", "text": transcript.text}
+        # 이름 앞뒤 공백/구두점 제거 후 첫 번째 단어만 추출
+        raw = transcript.text.strip()
+        name = raw.split()[0].strip(".,!?~") if raw else ""
+        return {"status": "success", "text": name}
     except Exception as e:
         print(f"[Error] {str(e)}")
         raise HTTPException(status_code=500, detail="Audio processing failed.")
