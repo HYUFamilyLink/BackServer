@@ -25,7 +25,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
         transcript = client.audio.transcriptions.create(
             model="whisper-1",
             file=(file.filename, audio_bytes),
-            language="ko"
+            language="ko",
+            prompt="사용자의 이름입니다. 예: 함승열, 김민수, 이철수, 박지수"
         )
         return {"status": "success", "text": transcript.text}
     except Exception as e:
