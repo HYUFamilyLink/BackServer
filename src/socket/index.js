@@ -23,7 +23,8 @@ function initSocket(httpServer) {
   io.on('connection', (socket) => {
     roomHandler(io, socket);
     lyricsHandler(io, socket);
-    friendHandler(io, socket); // 추가
+    friendHandler(io, socket);
+    socket.on('ping_rtt', () => socket.emit('pong_rtt'));
   });
 }
 
