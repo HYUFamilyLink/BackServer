@@ -62,7 +62,7 @@ if not exist "venv" (
 )
 echo Installing Python packages...
 call venv\Scripts\activate
-pip install fastapi uvicorn python-multipart openai-whisper demucs torch pydub
+pip install fastapi uvicorn python-multipart openai-whisper demucs torch pydub openai python-dotenv
 cd ..
 echo.
 
