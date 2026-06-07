@@ -103,6 +103,17 @@ module.exports = function roomHandler(io, socket) {
   };
 
   const joinRoomAction = async (roomId, joinCode) => {
+    try {
+      const socketsInRoom = await io.in(roomId).fetchSockets();
+      for (const existingSocket of socketsInRoom) {
+        if (existingSocket.id !== socket.id && existingSocket.user && String(existingSocket.user.id).trim() === myIdStr) {
+          console.log(`[Socket] 고스트 소켓 퇴장 처리: User ${myIdStr} (Socket ID: ${existingSocket.id})`);
+          existingSocket.leave(roomId); 
+        }
+      }
+    } catch (err) {
+      console.error("고스트 소켓 정리 중 오류:", err);
+    }
     socket.join(roomId);
     socket.roomId = roomId;
 
