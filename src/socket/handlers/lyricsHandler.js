@@ -20,6 +20,11 @@ module.exports = function lyricsHandler(io, socket) {
   socket.on('user:reaction', (data = {}) => {
     const roomId = socket.roomId;
     if (!roomId) return;
+    const now = Date.now();
+    if (socket.lastReactionTime && now - socket.lastReactionTime < 100) {
+      return; 
+    }
+    socket.lastReactionTime = now;
 
     io.to(roomId).emit('user:reaction', {
       userId:   socket.user.id,
